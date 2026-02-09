@@ -63,13 +63,15 @@ type ResourcePath struct {
 
 // ParameterConstraint defines constraints on a parameter.
 type ParameterConstraint struct {
-	ParameterName string     `json:"parameter_name"`
+	ParameterName string     `json:"parameterName"`
 	Constraint    Constraint `json:"constraint"`
 }
 
 // Constraint defines the constraint value.
 type Constraint struct {
-	FixedValue string `json:"fixed_value,omitempty"`
+	Type       string `json:"type,omitempty"`
+	FixedValue string `json:"fixedValue,omitempty"`
+	Required   bool   `json:"required,omitempty"`
 }
 
 // RecipeSpecResponse is the response from GET /plugins/:pluginId/recipe-specification.
@@ -79,16 +81,19 @@ type RecipeSpecResponse struct {
 }
 
 // PolicySuggest represents the policy suggestion from the plugin.
+// JSON field names use camelCase to match protobuf JSON encoding from the suggest API.
 type PolicySuggest struct {
 	Rules           []Rule `json:"rules"`
-	RateLimitWindow string `json:"rate_limit_window,omitempty"`
+	RateLimitWindow int    `json:"rateLimitWindow,omitempty"`
+	MaxTxsPerWindow int    `json:"maxTxsPerWindow,omitempty"`
 }
 
 // Rule represents a policy rule.
 type Rule struct {
 	Resource             string                `json:"resource"`
+	Effect               string                `json:"effect,omitempty"`
 	Target               *Target               `json:"target,omitempty"`
-	ParameterConstraints []ParameterConstraint `json:"parameter_constraints,omitempty"`
+	ParameterConstraints []ParameterConstraint `json:"parameterConstraints,omitempty"`
 }
 
 // Target represents a rule target.
@@ -98,7 +103,6 @@ type Target struct {
 
 // PolicySuggestResponse is the response from POST /plugins/:pluginId/recipe-specification/suggest.
 type PolicySuggestResponse struct {
-	Code int           `json:"code"`
 	Data PolicySuggest `json:"data"`
 }
 
