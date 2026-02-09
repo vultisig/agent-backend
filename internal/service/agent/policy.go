@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -21,11 +23,11 @@ type PolicyResponse struct {
 
 // PolicyReadyMetadata is the metadata for a policy-ready message.
 type PolicyReadyMetadata struct {
-	Type          string                 `json:"type"` // "policy_ready"
-	Action        string                 `json:"action"` // "create_policy"
-	PluginID      string                 `json:"plugin_id"`
+	Type          string                  `json:"type"`   // "policy_ready"
+	Action        string                  `json:"action"` // "create_policy"
+	PluginID      string                  `json:"plugin_id"`
 	PolicySuggest *verifier.PolicySuggest `json:"policy_suggest"`
-	Configuration map[string]any         `json:"configuration"`
+	Configuration map[string]any          `json:"configuration"`
 }
 
 // buildPolicy handles Ability 2: build policy from selected suggestion.
@@ -129,7 +131,11 @@ func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *S
 		return nil, fmt.Errorf("parse policy response: %w", err)
 	}
 
-	// 10. Call verifier's /suggest endpoint with the configuration
+	// 10. Convert from_amount from human-readable to base units
+	// TODO: Confirm if frontend or backend should convert
+	convertAmountToBaseUnits(policyResp.Configuration, balances)
+
+	// 11. Call verifier's /suggest endpoint with the configuration
 	policySuggest, err := s.verifier.GetPolicySuggest(ctx, suggestion.PluginID, policyResp.Configuration)
 	if err != nil {
 		return nil, fmt.Errorf("get policy suggest: %w", err)
@@ -187,7 +193,14 @@ func parsePolicyResponse(resp *anthropic.Response) (*PolicyResponse, error) {
 }
 
 // handleInstallRequired returns an install_required response when a plugin is not installed.
+// It also stores the suggestion ID in Redis so confirmAction can auto-continue to buildPolicy after install.
 func (s *AgentService) handleInstallRequired(ctx context.Context, convID uuid.UUID, suggestion Suggestion) (*SendMessageResponse, error) {
+	// Store pending suggestion for auto-continue after install
+	pendingKey := fmt.Sprintf("pending_build:%s", convID)
+	if err := s.redis.Set(ctx, pendingKey, suggestion.ID, suggestionTTL); err != nil {
+		s.logger.WithError(err).Warn("failed to store pending build suggestion")
+	}
+
 	content := fmt.Sprintf("To use %s, you need to install the plugin first. Please install it and try again.", suggestion.Title)
 
 	// Store assistant message in DB
@@ -209,4 +222,60 @@ func (s *AgentService) handleInstallRequired(ctx context.Context, convID uuid.UU
 			Description: fmt.Sprintf("Install %s to set up your automation", suggestion.Title),
 		},
 	}, nil
+}
+
+// convertAmountToBaseUnits converts fromAmount in the configuration from human-readable
+// format (e.g. "3.5") to base units (e.g. "3500000" for 6-decimal tokens like USDC).
+// It extracts the token address from the nested from.token field and matches it against
+// the user's balances to find the correct decimals.
+func convertAmountToBaseUnits(config map[string]any, balances []Balance) {
+	amountVal, ok := config["fromAmount"]
+	if !ok {
+		return
+	}
+
+	amountStr := fmt.Sprintf("%v", amountVal)
+
+	// Find decimals from balances by matching from.token
+	decimals := 18 // default to 18 (ETH-like)
+	if from, ok := config["from"].(map[string]any); ok {
+		if token, ok := from["token"].(string); ok && token != "" {
+			for _, b := range balances {
+				if strings.EqualFold(b.Asset, token) {
+					decimals = b.Decimals
+					break
+				}
+			}
+		}
+	}
+
+	baseUnits := toBaseUnits(amountStr, decimals)
+	config["fromAmount"] = baseUnits
+}
+
+// toBaseUnits converts a human-readable decimal string to base units.
+// e.g. toBaseUnits("3.5", 6) returns "3500000"
+func toBaseUnits(amount string, decimals int) string {
+	// Split on decimal point
+	parts := strings.SplitN(amount, ".", 2)
+	whole := parts[0]
+	frac := ""
+	if len(parts) == 2 {
+		frac = parts[1]
+	}
+
+	// Pad or truncate fractional part to exactly `decimals` digits
+	if len(frac) > decimals {
+		frac = frac[:decimals]
+	} else {
+		frac = frac + strings.Repeat("0", decimals-len(frac))
+	}
+
+	// Combine and parse as big.Int to strip leading zeros
+	raw := whole + frac
+	result, ok := new(big.Int).SetString(raw, 10)
+	if !ok {
+		return amount // return original if parsing fails
+	}
+	return result.String()
 }

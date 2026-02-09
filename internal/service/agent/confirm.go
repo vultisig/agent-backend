@@ -54,12 +54,12 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		Content: actionMsg,
 	})
 
-	// 4. Store the user's action result as a message
+	// 4. Store the user's action result as a message (marked as action_result so frontend can hide it)
 	userMsg := &types.Message{
 		ConversationID: convID,
 		Role:           types.RoleUser,
 		Content:        actionMsg,
-		ContentType:    "text",
+		ContentType:    "action_result",
 	}
 	if err := s.msgRepo.Create(ctx, userMsg); err != nil {
 		return nil, fmt.Errorf("store user message: %w", err)
@@ -98,7 +98,29 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		return nil, fmt.Errorf("store assistant message: %w", err)
 	}
 
-	// 8. Return response (suggestions could be added based on next_steps in future)
+	// 8. Auto-continue: if install_plugin succeeded, check for pending policy build
+	if req.ActionResult.Action == "install_plugin" && req.ActionResult.Success {
+		pendingKey := fmt.Sprintf("pending_build:%s", convID)
+		suggID, err := s.redis.Get(ctx, pendingKey)
+		if err == nil && suggID != "" {
+			_ = s.redis.Delete(ctx, pendingKey)
+			buildReq := &SendMessageRequest{
+				SelectedSuggestionID: &suggID,
+				Context:              req.Context,
+				AccessToken:          req.AccessToken,
+			}
+			buildResp, err := s.buildPolicy(ctx, convID, buildReq)
+			if err != nil {
+				s.logger.WithError(err).Warn("auto-continue to buildPolicy failed")
+				// Fall through to return normal confirmation
+			} else {
+				// Keep the confirmation message, add policy_ready data
+				buildResp.Message = *assistantMsg
+				return buildResp, nil
+			}
+		}
+	}
+
 	return &SendMessageResponse{
 		Message: *assistantMsg,
 	}, nil
