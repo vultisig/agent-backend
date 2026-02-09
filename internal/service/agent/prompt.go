@@ -246,7 +246,7 @@ Based on the conversation history and the user's selected action, create a confi
 1. Extract relevant parameters from the conversation (amounts, tokens, chains, frequency, etc.)
 2. Map them to the plugin's schema fields
 3. Use the user's wallet addresses for source addresses
-4. For tokens, use the correct token addresses (or "native" for native assets like ETH, BTC)
+4. For tokens, use the correct token contract addresses (e.g., "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" for USDC). For native assets (ETH, BTC, etc.), leave the token field as an empty string ""
 5. Ensure amounts are in human-readable format (e.g., "10" for 10 USDC, "0.5" for 0.5 ETH)
 
 ## Important
