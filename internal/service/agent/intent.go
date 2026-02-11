@@ -16,7 +16,7 @@ import (
 const suggestionTTL = 1 * time.Hour
 
 // detectIntent handles Ability 1: detect user intent and generate response with suggestions.
-func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *SendMessageRequest) (*SendMessageResponse, error) {
+func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *SendMessageRequest, window *conversationWindow) (*SendMessageResponse, error) {
 	// 1. Store user message in DB
 	userMsg := &types.Message{
 		ConversationID: convID,
@@ -28,13 +28,7 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 		return nil, fmt.Errorf("store user message: %w", err)
 	}
 
-	// 2. Get conversation history from DB
-	history, err := s.msgRepo.GetByConversationID(ctx, convID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation history: %w", err)
-	}
-
-	// 3. Build system prompt with user context and plugin skills
+	// 2. Build system prompt with user context and plugin skills
 	var balances []Balance
 	var addresses map[string]string
 	if req.Context != nil {
@@ -47,21 +41,12 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 		pluginSkills = s.pluginProvider.GetSkills(ctx)
 	}
 
-	systemPrompt := BuildFullPrompt(balances, addresses, pluginSkills)
+	systemPrompt := BuildSystemPromptWithSummary(BuildFullPrompt(balances, addresses, pluginSkills), window.summary)
 
-	// 4. Build messages for Anthropic
-	var messages []anthropic.Message
-	for _, msg := range history {
-		if msg.Role == types.RoleSystem {
-			continue // Skip system messages
-		}
-		messages = append(messages, anthropic.Message{
-			Role:    string(msg.Role),
-			Content: msg.Content,
-		})
-	}
+	// 3. Build messages for Anthropic
+	messages := anthropicMessagesFromWindow(window)
 
-	// 5. Call Anthropic with respond_to_user tool
+	// 4. Call Anthropic with respond_to_user tool
 	anthropicReq := &anthropic.Request{
 		System:   systemPrompt,
 		Messages: messages,
@@ -135,7 +120,7 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 	}
 
 	// 9. Update conversation title if this is the first exchange
-	if len(history) <= 1 {
+	if window.total <= 2 {
 		title := truncateTitle(req.Content)
 		if err := s.convRepo.UpdateTitle(ctx, convID, title); err != nil {
 			s.logger.WithError(err).Warn("failed to update conversation title")

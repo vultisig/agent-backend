@@ -81,31 +81,37 @@ func (s *AgentService) ProcessMessage(ctx context.Context, convID uuid.UUID, pub
 		return nil, fmt.Errorf("get conversation: %w", err)
 	}
 
+	// Load conversation window once before routing to abilities
+	window, err := s.getConversationWindow(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get conversation window: %w", err)
+	}
+
 	// Route based on request content
 	switch {
 	case req.ActionResult != nil:
 		// Ability 3: Action confirmation
-		return s.confirmAction(ctx, convID, req)
+		return s.confirmAction(ctx, convID, req, window)
 	case req.SelectedSuggestionID != nil:
 		// Ability 2: Policy builder
-		return s.buildPolicy(ctx, convID, req)
+		return s.buildPolicy(ctx, convID, req, window)
 	default:
 		// Ability 1: Intent detection (default)
-		return s.detectIntent(ctx, convID, req)
+		return s.detectIntent(ctx, convID, req, window)
 	}
 }
 
 // getConversationWindow returns a windowed view of the conversation.
 // If total messages fit in the window, returns all messages.
+// If total exceeds the summarize trigger, runs summarization synchronously before returning.
 // Otherwise returns the most recent messages plus any existing summary.
-// Falls back to full history if summary hasn't been generated yet.
 func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UUID) (*conversationWindow, error) {
 	total, err := s.msgRepo.CountByConversationID(ctx, convID)
 	if err != nil {
 		return nil, fmt.Errorf("count messages: %w", err)
 	}
 
-	// If messages fit in the window, load everything
+	// If messages fit in the window, load everything — no summarization needed
 	if total <= s.windowSize {
 		msgs, err := s.msgRepo.GetByConversationID(ctx, convID)
 		if err != nil {
@@ -114,13 +120,42 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 		return &conversationWindow{messages: msgs, total: total}, nil
 	}
 
-	// Check for existing summary
+	// Total exceeds window — run synchronous summarization if past trigger threshold
+	if total > s.summarizeTrigger {
+		allMsgs, err := s.msgRepo.GetByConversationID(ctx, convID)
+		if err != nil {
+			return nil, fmt.Errorf("get messages: %w", err)
+		}
+
+		if err := s.summarizeOldMessages(ctx, convID, allMsgs); err != nil {
+			s.logger.WithError(err).Error("synchronous summarization failed")
+		}
+
+		// Load recent window + summary (guaranteed to exist after successful summarization)
+		recentMsgs, err := s.msgRepo.GetRecent(ctx, convID, s.windowSize)
+		if err != nil {
+			return nil, fmt.Errorf("get recent messages: %w", err)
+		}
+
+		summary, err := s.convRepo.GetSummary(ctx, convID)
+		if err != nil {
+			return nil, fmt.Errorf("get summary: %w", err)
+		}
+
+		// If summarization failed and no prior summary exists, fall back to full history
+		if summary == nil {
+			return &conversationWindow{messages: allMsgs, total: total}, nil
+		}
+
+		return &conversationWindow{messages: recentMsgs, summary: summary, total: total}, nil
+	}
+
+	// Between windowSize and summarizeTrigger — use existing summary if available
 	summary, err := s.convRepo.GetSummary(ctx, convID)
 	if err != nil {
 		return nil, fmt.Errorf("get summary: %w", err)
 	}
 
-	// If no summary exists, fall back to full history
 	if summary == nil {
 		msgs, err := s.msgRepo.GetByConversationID(ctx, convID)
 		if err != nil {
@@ -129,7 +164,6 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 		return &conversationWindow{messages: msgs, total: total}, nil
 	}
 
-	// Load recent messages only
 	msgs, err := s.msgRepo.GetRecent(ctx, convID, s.windowSize)
 	if err != nil {
 		return nil, fmt.Errorf("get recent messages: %w", err)
@@ -138,26 +172,11 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 	return &conversationWindow{messages: msgs, summary: summary, total: total}, nil
 }
 
-// triggerSummarizationIfNeeded fires a background goroutine to summarize old messages
-// if the total message count exceeds the trigger threshold.
-func (s *AgentService) triggerSummarizationIfNeeded(convID uuid.UUID, total int) {
-	if total > s.summarizeTrigger {
-		go s.summarizeConversation(convID)
-	}
-}
-
-// summarizeConversation loads all messages, summarizes the older ones, and stores the summary.
-func (s *AgentService) summarizeConversation(convID uuid.UUID) {
-	ctx := context.Background()
-
-	allMsgs, err := s.msgRepo.GetByConversationID(ctx, convID)
-	if err != nil {
-		s.logger.WithError(err).Error("summarization: failed to load messages")
-		return
-	}
-
+// summarizeOldMessages summarizes messages outside the recent window and stores the summary.
+// It runs synchronously and returns an error if summarization fails.
+func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUID, allMsgs []types.Message) error {
 	if len(allMsgs) <= s.windowSize {
-		return
+		return nil
 	}
 
 	// Split: old messages to summarize, recent window to keep
@@ -188,8 +207,7 @@ func (s *AgentService) summarizeConversation(convID uuid.UUID) {
 
 	resp, err := s.anthropic.SendMessage(ctx, req)
 	if err != nil {
-		s.logger.WithError(err).Error("summarization: failed to call anthropic")
-		return
+		return fmt.Errorf("call anthropic: %w", err)
 	}
 
 	// Extract text response
@@ -202,15 +220,30 @@ func (s *AgentService) summarizeConversation(convID uuid.UUID) {
 	}
 
 	if summaryText == "" {
-		s.logger.Error("summarization: empty response from anthropic")
-		return
+		return fmt.Errorf("empty response from anthropic")
 	}
 
 	if err := s.convRepo.UpdateSummary(ctx, convID, summaryText); err != nil {
-		s.logger.WithError(err).Error("summarization: failed to store summary")
-		return
+		return fmt.Errorf("store summary: %w", err)
 	}
 
 	s.logger.WithField("conversation_id", convID).Info("conversation summary updated")
+	return nil
+}
+
+// anthropicMessagesFromWindow converts conversation window messages to Anthropic message format,
+// skipping system messages.
+func anthropicMessagesFromWindow(window *conversationWindow) []anthropic.Message {
+	var msgs []anthropic.Message
+	for _, msg := range window.messages {
+		if msg.Role == types.RoleSystem {
+			continue
+		}
+		msgs = append(msgs, anthropic.Message{
+			Role:    string(msg.Role),
+			Content: msg.Content,
+		})
+	}
+	return msgs
 }
 

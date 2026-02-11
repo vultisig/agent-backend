@@ -20,32 +20,17 @@ type ConfirmResponse struct {
 
 // confirmAction handles Ability 3: confirm action result.
 // Called when the frontend/mobile app reports the result of an action (e.g., policy created, install completed).
-func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req *SendMessageRequest) (*SendMessageResponse, error) {
+func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req *SendMessageRequest, window *conversationWindow) (*SendMessageResponse, error) {
 	if req.ActionResult == nil {
 		return nil, errors.New("action_result is required for action confirmation")
 	}
 
-	// 1. Get conversation history for context
-	history, err := s.msgRepo.GetByConversationID(ctx, convID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation history: %w", err)
-	}
+	// 1. Build system prompt for action confirmation
+	systemPrompt := BuildSystemPromptWithSummary(BuildConfirmActionPrompt(req.ActionResult), window.summary)
 
-	// 2. Build system prompt for action confirmation
-	systemPrompt := BuildConfirmActionPrompt(req.ActionResult)
-
-	// 3. Build messages for Anthropic
-	// Include history plus a synthetic user message about the action result
-	var messages []anthropic.Message
-	for _, msg := range history {
-		if msg.Role == types.RoleSystem {
-			continue
-		}
-		messages = append(messages, anthropic.Message{
-			Role:    string(msg.Role),
-			Content: msg.Content,
-		})
-	}
+	// 2. Build messages for Anthropic
+	// Include windowed history plus a synthetic user message about the action result
+	messages := anthropicMessagesFromWindow(window)
 
 	// Add synthetic user message describing the action result
 	actionMsg := buildActionResultMessage(req.ActionResult)
@@ -54,7 +39,7 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		Content: actionMsg,
 	})
 
-	// 4. Store the user's action result as a message (marked as action_result so frontend can hide it)
+	// 3. Store the user's action result as a message (marked as action_result so frontend can hide it)
 	userMsg := &types.Message{
 		ConversationID: convID,
 		Role:           types.RoleUser,
@@ -65,7 +50,7 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		return nil, fmt.Errorf("store user message: %w", err)
 	}
 
-	// 5. Call Anthropic with confirm_action tool (forced)
+	// 4. Call Anthropic with confirm_action tool (forced)
 	anthropicReq := &anthropic.Request{
 		System:   systemPrompt,
 		Messages: messages,
@@ -81,13 +66,13 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		return nil, fmt.Errorf("call anthropic: %w", err)
 	}
 
-	// 6. Parse tool response
+	// 5. Parse tool response
 	confirmResp, err := parseConfirmResponse(resp)
 	if err != nil {
 		return nil, fmt.Errorf("parse confirm response: %w", err)
 	}
 
-	// 7. Store assistant message in DB
+	// 6. Store assistant message in DB
 	assistantMsg := &types.Message{
 		ConversationID: convID,
 		Role:           types.RoleAssistant,
@@ -98,7 +83,7 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		return nil, fmt.Errorf("store assistant message: %w", err)
 	}
 
-	// 8. Auto-continue: if install_plugin succeeded, check for pending policy build
+	// 7. Auto-continue: if install_plugin succeeded, check for pending policy build
 	if req.ActionResult.Action == "install_plugin" && req.ActionResult.Success {
 		pendingKey := fmt.Sprintf("pending_build:%s", convID)
 		suggID, err := s.redis.Get(ctx, pendingKey)
@@ -109,7 +94,7 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 				Context:              req.Context,
 				AccessToken:          req.AccessToken,
 			}
-			buildResp, err := s.buildPolicy(ctx, convID, buildReq)
+			buildResp, err := s.buildPolicy(ctx, convID, buildReq, window)
 			if err != nil {
 				s.logger.WithError(err).Warn("auto-continue to buildPolicy failed")
 				// Fall through to return normal confirmation

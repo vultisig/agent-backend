@@ -31,7 +31,7 @@ type PolicyReadyMetadata struct {
 }
 
 // buildPolicy handles Ability 2: build policy from selected suggestion.
-func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *SendMessageRequest) (*SendMessageResponse, error) {
+func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *SendMessageRequest, window *conversationWindow) (*SendMessageResponse, error) {
 	if req.SelectedSuggestionID == nil {
 		return nil, errors.New("selected_suggestion_id is required for policy builder")
 	}
@@ -81,13 +81,7 @@ func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *S
 		examplesJSON, _ = json.MarshalIndent(schema.ConfigurationExample, "", "  ")
 	}
 
-	// 5. Get conversation history
-	history, err := s.msgRepo.GetByConversationID(ctx, convID)
-	if err != nil {
-		return nil, fmt.Errorf("get conversation history: %w", err)
-	}
-
-	// 6. Build system prompt for policy builder
+	// 5. Build system prompt for policy builder
 	var balances []Balance
 	var addresses map[string]string
 	if req.Context != nil {
@@ -95,21 +89,15 @@ func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *S
 		addresses = req.Context.Addresses
 	}
 
-	systemPrompt := BuildPolicyBuilderPrompt(suggestion, string(configSchemaJSON), string(examplesJSON), balances, addresses)
+	systemPrompt := BuildSystemPromptWithSummary(
+		BuildPolicyBuilderPrompt(suggestion, string(configSchemaJSON), string(examplesJSON), balances, addresses),
+		window.summary,
+	)
 
-	// 7. Build messages for Anthropic
-	var messages []anthropic.Message
-	for _, msg := range history {
-		if msg.Role == types.RoleSystem {
-			continue
-		}
-		messages = append(messages, anthropic.Message{
-			Role:    string(msg.Role),
-			Content: msg.Content,
-		})
-	}
+	// 6. Build messages for Anthropic
+	messages := anthropicMessagesFromWindow(window)
 
-	// 8. Call Anthropic with build_policy tool (forced)
+	// 7. Call Anthropic with build_policy tool (forced)
 	anthropicReq := &anthropic.Request{
 		System:   systemPrompt,
 		Messages: messages,
