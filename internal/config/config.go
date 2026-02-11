@@ -11,6 +11,7 @@ type Config struct {
 	Database  DatabaseConfig
 	Redis     RedisConfig
 	Anthropic AnthropicConfig
+	Context   ContextConfig
 	Verifier  VerifierConfig
 }
 
@@ -33,11 +34,19 @@ type RedisConfig struct {
 
 // AnthropicConfig holds Anthropic Claude API configuration.
 type AnthropicConfig struct {
-	APIKey string `envconfig:"ANTHROPIC_API_KEY" required:"true"`
-	Model  string `envconfig:"ANTHROPIC_MODEL" default:"claude-sonnet-4-20250514"`
+	APIKey       string `envconfig:"ANTHROPIC_API_KEY" required:"true"`
+	Model        string `envconfig:"ANTHROPIC_MODEL" default:"claude-sonnet-4-20250514"`
+	SummaryModel string `envconfig:"ANTHROPIC_SUMMARY_MODEL" default:"claude-haiku-4-5-20251001"`
 }
 
 // TODO: Add WhisperConfig for OpenAI Whisper voice transcription support.
+
+// ContextConfig holds conversation context window configuration.
+type ContextConfig struct {
+	WindowSize       int `envconfig:"CONTEXT_WINDOW_SIZE" default:"20"`
+	SummarizeTrigger int `envconfig:"CONTEXT_SUMMARIZE_TRIGGER" default:"30"`
+	SummaryMaxTokens int `envconfig:"CONTEXT_SUMMARY_MAX_TOKENS" default:"512"`
+}
 
 // VerifierConfig holds verifier service configuration.
 type VerifierConfig struct {

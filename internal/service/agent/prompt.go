@@ -145,6 +145,23 @@ type PluginSkill struct {
 	Skills   string // Raw markdown content from skills.md
 }
 
+// SummarizationPrompt is the prompt used to summarize older conversation messages.
+const SummarizationPrompt = `Summarize the following conversation between a user and the Vultisig AI assistant. Focus on:
+- Key user intents and requests
+- Important decisions made
+- Assets, amounts, chains, and addresses mentioned
+- Actions taken or pending
+
+Be concise but preserve all actionable details. This summary will be used as context for future messages.`
+
+// BuildSystemPromptWithSummary appends an earlier conversation summary to the base system prompt.
+func BuildSystemPromptWithSummary(basePrompt string, summary *string) string {
+	if summary == nil {
+		return basePrompt
+	}
+	return basePrompt + "\n\n## Earlier Conversation Summary\n\n" + *summary
+}
+
 // BuildFullPrompt constructs the complete system prompt with context and plugin skills.
 func BuildFullPrompt(balances []Balance, addresses map[string]string, plugins []PluginSkill) string {
 	var sb strings.Builder
