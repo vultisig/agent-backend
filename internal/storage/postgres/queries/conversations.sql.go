@@ -46,7 +46,7 @@ const createConversation = `-- name: CreateConversation :one
 
 INSERT INTO agent_conversations (public_key)
 VALUES ($1)
-RETURNING id, public_key, title, summary, created_at, updated_at, archived_at
+RETURNING id, public_key, title, summary, summary_up_to, created_at, updated_at, archived_at
 `
 
 // Conversations table queries
@@ -58,6 +58,7 @@ func (q *Queries) CreateConversation(ctx context.Context, publicKey string) (*Ag
 		&i.PublicKey,
 		&i.Title,
 		&i.Summary,
+		&i.SummaryUpTo,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ArchivedAt,
@@ -66,7 +67,7 @@ func (q *Queries) CreateConversation(ctx context.Context, publicKey string) (*Ag
 }
 
 const getConversationByID = `-- name: GetConversationByID :one
-SELECT id, public_key, title, summary, created_at, updated_at, archived_at FROM agent_conversations
+SELECT id, public_key, title, summary, summary_up_to, created_at, updated_at, archived_at FROM agent_conversations
 WHERE id = $1 AND public_key = $2 AND archived_at IS NULL
 `
 
@@ -83,6 +84,7 @@ func (q *Queries) GetConversationByID(ctx context.Context, arg *GetConversationB
 		&i.PublicKey,
 		&i.Title,
 		&i.Summary,
+		&i.SummaryUpTo,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ArchivedAt,
@@ -102,8 +104,25 @@ func (q *Queries) GetConversationSummary(ctx context.Context, id pgtype.UUID) (p
 	return summary, err
 }
 
+const getConversationSummaryWithCursor = `-- name: GetConversationSummaryWithCursor :one
+SELECT summary, summary_up_to FROM agent_conversations
+WHERE id = $1
+`
+
+type GetConversationSummaryWithCursorRow struct {
+	Summary     pgtype.Text        `json:"summary"`
+	SummaryUpTo pgtype.Timestamptz `json:"summary_up_to"`
+}
+
+func (q *Queries) GetConversationSummaryWithCursor(ctx context.Context, id pgtype.UUID) (*GetConversationSummaryWithCursorRow, error) {
+	row := q.db.QueryRow(ctx, getConversationSummaryWithCursor, id)
+	var i GetConversationSummaryWithCursorRow
+	err := row.Scan(&i.Summary, &i.SummaryUpTo)
+	return &i, err
+}
+
 const listConversations = `-- name: ListConversations :many
-SELECT id, public_key, title, summary, created_at, updated_at, archived_at FROM agent_conversations
+SELECT id, public_key, title, summary, summary_up_to, created_at, updated_at, archived_at FROM agent_conversations
 WHERE public_key = $1 AND archived_at IS NULL
 ORDER BY updated_at DESC
 LIMIT $2 OFFSET $3
@@ -129,6 +148,7 @@ func (q *Queries) ListConversations(ctx context.Context, arg *ListConversationsP
 			&i.PublicKey,
 			&i.Title,
 			&i.Summary,
+			&i.SummaryUpTo,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ArchivedAt,
@@ -156,6 +176,26 @@ type UpdateConversationSummaryParams struct {
 
 func (q *Queries) UpdateConversationSummary(ctx context.Context, arg *UpdateConversationSummaryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateConversationSummary, arg.Summary, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateConversationSummaryWithCursor = `-- name: UpdateConversationSummaryWithCursor :execrows
+UPDATE agent_conversations
+SET summary = $1, summary_up_to = $2, updated_at = NOW()
+WHERE id = $3
+`
+
+type UpdateConversationSummaryWithCursorParams struct {
+	Summary     pgtype.Text        `json:"summary"`
+	SummaryUpTo pgtype.Timestamptz `json:"summary_up_to"`
+	ID          pgtype.UUID        `json:"id"`
+}
+
+func (q *Queries) UpdateConversationSummaryWithCursor(ctx context.Context, arg *UpdateConversationSummaryWithCursorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateConversationSummaryWithCursor, arg.Summary, arg.SummaryUpTo, arg.ID)
 	if err != nil {
 		return 0, err
 	}

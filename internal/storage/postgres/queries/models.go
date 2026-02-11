@@ -55,13 +55,14 @@ func (ns NullAgentMessageRole) Value() (driver.Value, error) {
 }
 
 type AgentConversation struct {
-	ID         pgtype.UUID        `json:"id"`
-	PublicKey  string             `json:"public_key"`
-	Title      pgtype.Text        `json:"title"`
-	Summary    pgtype.Text        `json:"summary"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
-	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+	ID          pgtype.UUID        `json:"id"`
+	PublicKey   string             `json:"public_key"`
+	Title       pgtype.Text        `json:"title"`
+	Summary     pgtype.Text        `json:"summary"`
+	SummaryUpTo pgtype.Timestamptz `json:"summary_up_to"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 }
 
 type AgentMessage struct {

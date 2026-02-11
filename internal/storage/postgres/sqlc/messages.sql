@@ -19,3 +19,18 @@ LIMIT $2;
 -- name: CountMessagesByConversationID :one
 SELECT COUNT(*) FROM agent_messages
 WHERE conversation_id = $1;
+
+-- name: CountMessagesSince :one
+SELECT COUNT(*) FROM agent_messages
+WHERE conversation_id = $1 AND created_at > $2;
+
+-- name: GetMessagesSince :many
+SELECT * FROM agent_messages
+WHERE conversation_id = $1 AND created_at > $2
+ORDER BY created_at ASC;
+
+-- name: GetRecentMessagesSince :many
+SELECT * FROM agent_messages
+WHERE conversation_id = $1 AND created_at > $2
+ORDER BY created_at DESC
+LIMIT $3;

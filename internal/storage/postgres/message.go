@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -77,4 +78,46 @@ func (r *MessageRepository) CountByConversationID(ctx context.Context, convID uu
 		return 0, fmt.Errorf("count messages: %w", err)
 	}
 	return int(count), nil
+}
+
+// CountSince returns the number of messages created after the given timestamp.
+func (r *MessageRepository) CountSince(ctx context.Context, convID uuid.UUID, since time.Time) (int, error) {
+	count, err := r.q.CountMessagesSince(ctx, &queries.CountMessagesSinceParams{
+		ConversationID: uuidToPgtype(convID),
+		CreatedAt:      timeToPgtimestamptz(since),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count messages since: %w", err)
+	}
+	return int(count), nil
+}
+
+// GetSince returns all messages created after the given timestamp in chronological order.
+func (r *MessageRepository) GetSince(ctx context.Context, convID uuid.UUID, since time.Time) ([]types.Message, error) {
+	msgs, err := r.q.GetMessagesSince(ctx, &queries.GetMessagesSinceParams{
+		ConversationID: uuidToPgtype(convID),
+		CreatedAt:      timeToPgtimestamptz(since),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get messages since: %w", err)
+	}
+	return messagesFromDB(msgs), nil
+}
+
+// GetRecentSince returns the most recent messages after the given timestamp in chronological order.
+func (r *MessageRepository) GetRecentSince(ctx context.Context, convID uuid.UUID, since time.Time, limit int) ([]types.Message, error) {
+	msgs, err := r.q.GetRecentMessagesSince(ctx, &queries.GetRecentMessagesSinceParams{
+		ConversationID: uuidToPgtype(convID),
+		CreatedAt:      timeToPgtimestamptz(since),
+		Limit:          int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get recent messages since: %w", err)
+	}
+	result := messagesFromDB(msgs)
+	// Reverse to get chronological order (query returns DESC)
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result, nil
 }

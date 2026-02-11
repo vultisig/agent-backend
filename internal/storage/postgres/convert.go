@@ -59,6 +59,13 @@ func pgtimestamptzToTimePtr(t pgtype.Timestamptz) *time.Time {
 	return &t.Time
 }
 
+func timeToPgtimestamptz(t time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{
+		Time:  t,
+		Valid: true,
+	}
+}
+
 // Model conversions
 
 func conversationFromDB(c *queries.AgentConversation) *types.Conversation {
@@ -66,13 +73,14 @@ func conversationFromDB(c *queries.AgentConversation) *types.Conversation {
 		return nil
 	}
 	return &types.Conversation{
-		ID:         pgtypeToUUID(c.ID),
-		PublicKey:  c.PublicKey,
-		Title:      pgtextToStringPtr(c.Title),
-		Summary:    pgtextToStringPtr(c.Summary),
-		CreatedAt:  pgtimestamptzToTime(c.CreatedAt),
-		UpdatedAt:  pgtimestamptzToTime(c.UpdatedAt),
-		ArchivedAt: pgtimestamptzToTimePtr(c.ArchivedAt),
+		ID:          pgtypeToUUID(c.ID),
+		PublicKey:   c.PublicKey,
+		Title:       pgtextToStringPtr(c.Title),
+		Summary:     pgtextToStringPtr(c.Summary),
+		SummaryUpTo: pgtimestamptzToTimePtr(c.SummaryUpTo),
+		CreatedAt:   pgtimestamptzToTime(c.CreatedAt),
+		UpdatedAt:   pgtimestamptzToTime(c.UpdatedAt),
+		ArchivedAt:  pgtimestamptzToTimePtr(c.ArchivedAt),
 	}
 }
 

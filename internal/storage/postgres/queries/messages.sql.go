@@ -23,6 +23,23 @@ func (q *Queries) CountMessagesByConversationID(ctx context.Context, conversatio
 	return count, err
 }
 
+const countMessagesSince = `-- name: CountMessagesSince :one
+SELECT COUNT(*) FROM agent_messages
+WHERE conversation_id = $1 AND created_at > $2
+`
+
+type CountMessagesSinceParams struct {
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CountMessagesSince(ctx context.Context, arg *CountMessagesSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessagesSince, arg.ConversationID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 
 INSERT INTO agent_messages (conversation_id, role, content, content_type, audio_url, metadata)
@@ -98,6 +115,46 @@ func (q *Queries) GetMessagesByConversationID(ctx context.Context, conversationI
 	return items, nil
 }
 
+const getMessagesSince = `-- name: GetMessagesSince :many
+SELECT id, conversation_id, role, content, content_type, audio_url, metadata, created_at FROM agent_messages
+WHERE conversation_id = $1 AND created_at > $2
+ORDER BY created_at ASC
+`
+
+type GetMessagesSinceParams struct {
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetMessagesSince(ctx context.Context, arg *GetMessagesSinceParams) ([]*AgentMessage, error) {
+	rows, err := q.db.Query(ctx, getMessagesSince, arg.ConversationID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*AgentMessage{}
+	for rows.Next() {
+		var i AgentMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.Role,
+			&i.Content,
+			&i.ContentType,
+			&i.AudioUrl,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRecentMessages = `-- name: GetRecentMessages :many
 SELECT id, conversation_id, role, content, content_type, audio_url, metadata, created_at FROM agent_messages
 WHERE conversation_id = $1
@@ -112,6 +169,48 @@ type GetRecentMessagesParams struct {
 
 func (q *Queries) GetRecentMessages(ctx context.Context, arg *GetRecentMessagesParams) ([]*AgentMessage, error) {
 	rows, err := q.db.Query(ctx, getRecentMessages, arg.ConversationID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*AgentMessage{}
+	for rows.Next() {
+		var i AgentMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.Role,
+			&i.Content,
+			&i.ContentType,
+			&i.AudioUrl,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getRecentMessagesSince = `-- name: GetRecentMessagesSince :many
+SELECT id, conversation_id, role, content, content_type, audio_url, metadata, created_at FROM agent_messages
+WHERE conversation_id = $1 AND created_at > $2
+ORDER BY created_at DESC
+LIMIT $3
+`
+
+type GetRecentMessagesSinceParams struct {
+	ConversationID pgtype.UUID        `json:"conversation_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Limit          int32              `json:"limit"`
+}
+
+func (q *Queries) GetRecentMessagesSince(ctx context.Context, arg *GetRecentMessagesSinceParams) ([]*AgentMessage, error) {
+	rows, err := q.db.Query(ctx, getRecentMessagesSince, arg.ConversationID, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

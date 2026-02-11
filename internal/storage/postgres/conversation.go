@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -141,4 +142,29 @@ func (r *ConversationRepository) GetSummary(ctx context.Context, id uuid.UUID) (
 		return nil, fmt.Errorf("get summary: %w", err)
 	}
 	return pgtextToStringPtr(summary), nil
+}
+
+// UpdateSummaryWithCursor updates the summary and advances the summary_up_to cursor.
+func (r *ConversationRepository) UpdateSummaryWithCursor(ctx context.Context, id uuid.UUID, summary string, summaryUpTo time.Time) error {
+	_, err := r.q.UpdateConversationSummaryWithCursor(ctx, &queries.UpdateConversationSummaryWithCursorParams{
+		Summary:     stringPtrToPgtext(&summary),
+		SummaryUpTo: timeToPgtimestamptz(summaryUpTo),
+		ID:          uuidToPgtype(id),
+	})
+	if err != nil {
+		return fmt.Errorf("update summary with cursor: %w", err)
+	}
+	return nil
+}
+
+// GetSummaryWithCursor returns the summary and summary_up_to cursor of a conversation.
+func (r *ConversationRepository) GetSummaryWithCursor(ctx context.Context, id uuid.UUID) (*string, *time.Time, error) {
+	row, err := r.q.GetConversationSummaryWithCursor(ctx, uuidToPgtype(id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("get summary with cursor: %w", err)
+	}
+	return pgtextToStringPtr(row.Summary), pgtimestamptzToTimePtr(row.SummaryUpTo), nil
 }

@@ -8,6 +8,7 @@ CREATE TABLE agent_conversations (
     public_key VARCHAR(66) NOT NULL,
     title TEXT,
     summary TEXT,
+    summary_up_to TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     archived_at TIMESTAMPTZ

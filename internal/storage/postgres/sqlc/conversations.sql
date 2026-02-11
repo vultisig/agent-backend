@@ -37,3 +37,12 @@ WHERE id = $2;
 -- name: GetConversationSummary :one
 SELECT summary FROM agent_conversations
 WHERE id = $1;
+
+-- name: UpdateConversationSummaryWithCursor :execrows
+UPDATE agent_conversations
+SET summary = $1, summary_up_to = $2, updated_at = NOW()
+WHERE id = $3;
+
+-- name: GetConversationSummaryWithCursor :one
+SELECT summary, summary_up_to FROM agent_conversations
+WHERE id = $1;
