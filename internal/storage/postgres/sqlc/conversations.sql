@@ -29,15 +29,6 @@ UPDATE agent_conversations
 SET title = $1, updated_at = NOW()
 WHERE id = $2 AND archived_at IS NULL;
 
--- name: UpdateConversationSummary :execrows
-UPDATE agent_conversations
-SET summary = $1, updated_at = NOW()
-WHERE id = $2;
-
--- name: GetConversationSummary :one
-SELECT summary FROM agent_conversations
-WHERE id = $1;
-
 -- name: UpdateConversationSummaryWithCursor :execrows
 UPDATE agent_conversations
 SET summary = $1, summary_up_to = $2, updated_at = NOW()

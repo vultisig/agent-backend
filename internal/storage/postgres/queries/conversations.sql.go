@@ -92,18 +92,6 @@ func (q *Queries) GetConversationByID(ctx context.Context, arg *GetConversationB
 	return &i, err
 }
 
-const getConversationSummary = `-- name: GetConversationSummary :one
-SELECT summary FROM agent_conversations
-WHERE id = $1
-`
-
-func (q *Queries) GetConversationSummary(ctx context.Context, id pgtype.UUID) (pgtype.Text, error) {
-	row := q.db.QueryRow(ctx, getConversationSummary, id)
-	var summary pgtype.Text
-	err := row.Scan(&summary)
-	return summary, err
-}
-
 const getConversationSummaryWithCursor = `-- name: GetConversationSummaryWithCursor :one
 SELECT summary, summary_up_to FROM agent_conversations
 WHERE id = $1
@@ -161,25 +149,6 @@ func (q *Queries) ListConversations(ctx context.Context, arg *ListConversationsP
 		return nil, err
 	}
 	return items, nil
-}
-
-const updateConversationSummary = `-- name: UpdateConversationSummary :execrows
-UPDATE agent_conversations
-SET summary = $1, updated_at = NOW()
-WHERE id = $2
-`
-
-type UpdateConversationSummaryParams struct {
-	Summary pgtype.Text `json:"summary"`
-	ID      pgtype.UUID `json:"id"`
-}
-
-func (q *Queries) UpdateConversationSummary(ctx context.Context, arg *UpdateConversationSummaryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateConversationSummary, arg.Summary, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const updateConversationSummaryWithCursor = `-- name: UpdateConversationSummaryWithCursor :execrows
