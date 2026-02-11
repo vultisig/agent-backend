@@ -102,16 +102,89 @@ func (s *AgentService) ProcessMessage(ctx context.Context, convID uuid.UUID, pub
 }
 
 // getConversationWindow returns a windowed view of the conversation.
-// If total messages fit in the window, returns all messages.
-// If total exceeds the summarize trigger, runs summarization synchronously before returning.
-// Otherwise returns the most recent messages plus any existing summary.
+// Uses a summary_up_to cursor to only count/load messages after the last summarization point.
+// This prevents re-summarizing on every request once the trigger threshold is crossed.
 func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UUID) (*conversationWindow, error) {
+	// Load summary and cursor together
+	summary, cursor, err := s.convRepo.GetSummaryWithCursor(ctx, convID)
+	if err != nil {
+		return nil, fmt.Errorf("get summary with cursor: %w", err)
+	}
+
+	// Cursor-aware path: only count messages after the cursor
+	if cursor != nil {
+		count, err := s.msgRepo.CountSince(ctx, convID, *cursor)
+		if err != nil {
+			return nil, fmt.Errorf("count messages since cursor: %w", err)
+		}
+
+		s.logger.WithFields(logrus.Fields{
+			"conversation_id":   convID,
+			"active_count":      count,
+			"window_size":       s.windowSize,
+			"summarize_trigger": s.summarizeTrigger,
+			"has_cursor":        true,
+		}).Debug("context window state")
+
+		// Active messages fit in window — load all since cursor
+		if count <= s.windowSize {
+			msgs, err := s.msgRepo.GetSince(ctx, convID, *cursor)
+			if err != nil {
+				return nil, fmt.Errorf("get messages since cursor: %w", err)
+			}
+			return &conversationWindow{messages: msgs, summary: summary, total: count}, nil
+		}
+
+		// Active messages exceed trigger — re-summarize
+		if count > s.summarizeTrigger {
+			allSinceCursor, err := s.msgRepo.GetSince(ctx, convID, *cursor)
+			if err != nil {
+				return nil, fmt.Errorf("get messages since cursor: %w", err)
+			}
+
+			if err := s.summarizeOldMessages(ctx, convID, allSinceCursor); err != nil {
+				s.logger.WithError(err).Error("synchronous summarization failed")
+				// Fall back to recent window + existing summary
+			}
+
+			// Reload summary+cursor after summarization (cursor has advanced)
+			summary, cursor, err = s.convRepo.GetSummaryWithCursor(ctx, convID)
+			if err != nil {
+				return nil, fmt.Errorf("get summary after summarization: %w", err)
+			}
+
+			if cursor != nil {
+				recentMsgs, err := s.msgRepo.GetRecentSince(ctx, convID, *cursor, s.windowSize)
+				if err != nil {
+					return nil, fmt.Errorf("get recent messages since cursor: %w", err)
+				}
+				return &conversationWindow{messages: recentMsgs, summary: summary, total: len(recentMsgs)}, nil
+			}
+		}
+
+		// Between window and trigger — load recent since cursor
+		msgs, err := s.msgRepo.GetRecentSince(ctx, convID, *cursor, s.windowSize)
+		if err != nil {
+			return nil, fmt.Errorf("get recent messages since cursor: %w", err)
+		}
+		return &conversationWindow{messages: msgs, summary: summary, total: count}, nil
+	}
+
+	// No cursor — first summarization hasn't happened yet
 	total, err := s.msgRepo.CountByConversationID(ctx, convID)
 	if err != nil {
 		return nil, fmt.Errorf("count messages: %w", err)
 	}
 
-	// If messages fit in the window, load everything — no summarization needed
+	s.logger.WithFields(logrus.Fields{
+		"conversation_id":   convID,
+		"total":             total,
+		"window_size":       s.windowSize,
+		"summarize_trigger": s.summarizeTrigger,
+		"has_cursor":        false,
+	}).Debug("context window state")
+
+	// All messages fit in window
 	if total <= s.windowSize {
 		msgs, err := s.msgRepo.GetByConversationID(ctx, convID)
 		if err != nil {
@@ -120,7 +193,7 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 		return &conversationWindow{messages: msgs, total: total}, nil
 	}
 
-	// Total exceeds window — run synchronous summarization if past trigger threshold
+	// Past trigger — first-time summarization
 	if total > s.summarizeTrigger {
 		allMsgs, err := s.msgRepo.GetByConversationID(ctx, convID)
 		if err != nil {
@@ -129,51 +202,41 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 
 		if err := s.summarizeOldMessages(ctx, convID, allMsgs); err != nil {
 			s.logger.WithError(err).Error("synchronous summarization failed")
+			return &conversationWindow{messages: allMsgs, total: total}, nil
 		}
 
-		// Load recent window + summary (guaranteed to exist after successful summarization)
+		// Reload summary+cursor after first summarization
+		summary, cursor, err = s.convRepo.GetSummaryWithCursor(ctx, convID)
+		if err != nil {
+			return nil, fmt.Errorf("get summary after summarization: %w", err)
+		}
+
+		if cursor != nil {
+			recentMsgs, err := s.msgRepo.GetRecentSince(ctx, convID, *cursor, s.windowSize)
+			if err != nil {
+				return nil, fmt.Errorf("get recent messages since cursor: %w", err)
+			}
+			return &conversationWindow{messages: recentMsgs, summary: summary, total: len(recentMsgs)}, nil
+		}
+
+		// Fallback if cursor wasn't set (shouldn't happen)
 		recentMsgs, err := s.msgRepo.GetRecent(ctx, convID, s.windowSize)
 		if err != nil {
 			return nil, fmt.Errorf("get recent messages: %w", err)
 		}
-
-		summary, err := s.convRepo.GetSummary(ctx, convID)
-		if err != nil {
-			return nil, fmt.Errorf("get summary: %w", err)
-		}
-
-		// If summarization failed and no prior summary exists, fall back to full history
-		if summary == nil {
-			return &conversationWindow{messages: allMsgs, total: total}, nil
-		}
-
 		return &conversationWindow{messages: recentMsgs, summary: summary, total: total}, nil
 	}
 
-	// Between windowSize and summarizeTrigger — use existing summary if available
-	summary, err := s.convRepo.GetSummary(ctx, convID)
+	// Between window and trigger, no cursor yet — load all messages
+	msgs, err := s.msgRepo.GetByConversationID(ctx, convID)
 	if err != nil {
-		return nil, fmt.Errorf("get summary: %w", err)
+		return nil, fmt.Errorf("get messages: %w", err)
 	}
-
-	if summary == nil {
-		msgs, err := s.msgRepo.GetByConversationID(ctx, convID)
-		if err != nil {
-			return nil, fmt.Errorf("get messages: %w", err)
-		}
-		return &conversationWindow{messages: msgs, total: total}, nil
-	}
-
-	msgs, err := s.msgRepo.GetRecent(ctx, convID, s.windowSize)
-	if err != nil {
-		return nil, fmt.Errorf("get recent messages: %w", err)
-	}
-
-	return &conversationWindow{messages: msgs, summary: summary, total: total}, nil
+	return &conversationWindow{messages: msgs, total: total}, nil
 }
 
 // summarizeOldMessages summarizes messages outside the recent window and stores the summary.
-// It runs synchronously and returns an error if summarization fails.
+// It runs synchronously and advances the summary_up_to cursor to the last summarized message.
 func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUID, allMsgs []types.Message) error {
 	if len(allMsgs) <= s.windowSize {
 		return nil
@@ -189,7 +252,7 @@ func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUI
 	}
 
 	// Include existing summary for incremental summarization
-	existingSummary, _ := s.convRepo.GetSummary(ctx, convID)
+	existingSummary, _, _ := s.convRepo.GetSummaryWithCursor(ctx, convID)
 	prompt := SummarizationPrompt
 	if existingSummary != nil {
 		prompt += "\n\n## Previous Summary\n\n" + *existingSummary
@@ -223,18 +286,24 @@ func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUI
 		return fmt.Errorf("empty response from anthropic")
 	}
 
-	if err := s.convRepo.UpdateSummary(ctx, convID, summaryText); err != nil {
-		return fmt.Errorf("store summary: %w", err)
+	// Advance cursor to the last summarized message's timestamp
+	summaryUpTo := oldMsgs[len(oldMsgs)-1].CreatedAt
+	if err := s.convRepo.UpdateSummaryWithCursor(ctx, convID, summaryText, summaryUpTo); err != nil {
+		return fmt.Errorf("store summary with cursor: %w", err)
 	}
 
-	s.logger.WithField("conversation_id", convID).Info("conversation summary updated")
+	s.logger.WithFields(logrus.Fields{
+		"conversation_id": convID,
+		"summary_length":  len(summaryText),
+		"summary_up_to":   summaryUpTo,
+	}).Info("conversation summary updated")
 	return nil
 }
 
 // anthropicMessagesFromWindow converts conversation window messages to Anthropic message format,
 // skipping system messages.
 func anthropicMessagesFromWindow(window *conversationWindow) []anthropic.Message {
-	var msgs []anthropic.Message
+	msgs := make([]anthropic.Message, 0, len(window.messages))
 	for _, msg := range window.messages {
 		if msg.Role == types.RoleSystem {
 			continue
