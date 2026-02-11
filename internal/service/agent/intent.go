@@ -45,6 +45,11 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 
 	// 3. Build messages for Anthropic
 	messages := anthropicMessagesFromWindow(window)
+	// Append current user message (stored above but not in the pre-loaded window)
+	messages = append(messages, anthropic.Message{
+		Role:    "user",
+		Content: req.Content,
+	})
 
 	// 4. Call Anthropic with respond_to_user tool
 	anthropicReq := &anthropic.Request{
