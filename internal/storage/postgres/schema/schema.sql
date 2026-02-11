@@ -7,6 +7,7 @@ CREATE TABLE agent_conversations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     public_key VARCHAR(66) NOT NULL,
     title TEXT,
+    summary TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     archived_at TIMESTAMPTZ

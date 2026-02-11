@@ -69,6 +69,7 @@ func conversationFromDB(c *queries.AgentConversation) *types.Conversation {
 		ID:         pgtypeToUUID(c.ID),
 		PublicKey:  c.PublicKey,
 		Title:      pgtextToStringPtr(c.Title),
+		Summary:    pgtextToStringPtr(c.Summary),
 		CreatedAt:  pgtimestamptzToTime(c.CreatedAt),
 		UpdatedAt:  pgtimestamptzToTime(c.UpdatedAt),
 		ArchivedAt: pgtimestamptzToTimePtr(c.ArchivedAt),

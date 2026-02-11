@@ -118,3 +118,27 @@ func (r *ConversationRepository) UpdateTitle(ctx context.Context, id uuid.UUID, 
 	}
 	return nil
 }
+
+// UpdateSummary updates the summary of a conversation.
+func (r *ConversationRepository) UpdateSummary(ctx context.Context, id uuid.UUID, summary string) error {
+	_, err := r.q.UpdateConversationSummary(ctx, &queries.UpdateConversationSummaryParams{
+		Summary: stringPtrToPgtext(&summary),
+		ID:      uuidToPgtype(id),
+	})
+	if err != nil {
+		return fmt.Errorf("update summary: %w", err)
+	}
+	return nil
+}
+
+// GetSummary returns the summary of a conversation.
+func (r *ConversationRepository) GetSummary(ctx context.Context, id uuid.UUID) (*string, error) {
+	summary, err := r.q.GetConversationSummary(ctx, uuidToPgtype(id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get summary: %w", err)
+	}
+	return pgtextToStringPtr(summary), nil
+}

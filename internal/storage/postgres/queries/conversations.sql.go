@@ -46,7 +46,7 @@ const createConversation = `-- name: CreateConversation :one
 
 INSERT INTO agent_conversations (public_key)
 VALUES ($1)
-RETURNING id, public_key, title, created_at, updated_at, archived_at
+RETURNING id, public_key, title, summary, created_at, updated_at, archived_at
 `
 
 // Conversations table queries
@@ -57,6 +57,7 @@ func (q *Queries) CreateConversation(ctx context.Context, publicKey string) (*Ag
 		&i.ID,
 		&i.PublicKey,
 		&i.Title,
+		&i.Summary,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ArchivedAt,
@@ -65,7 +66,7 @@ func (q *Queries) CreateConversation(ctx context.Context, publicKey string) (*Ag
 }
 
 const getConversationByID = `-- name: GetConversationByID :one
-SELECT id, public_key, title, created_at, updated_at, archived_at FROM agent_conversations
+SELECT id, public_key, title, summary, created_at, updated_at, archived_at FROM agent_conversations
 WHERE id = $1 AND public_key = $2 AND archived_at IS NULL
 `
 
@@ -81,6 +82,7 @@ func (q *Queries) GetConversationByID(ctx context.Context, arg *GetConversationB
 		&i.ID,
 		&i.PublicKey,
 		&i.Title,
+		&i.Summary,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ArchivedAt,
@@ -88,8 +90,20 @@ func (q *Queries) GetConversationByID(ctx context.Context, arg *GetConversationB
 	return &i, err
 }
 
+const getConversationSummary = `-- name: GetConversationSummary :one
+SELECT summary FROM agent_conversations
+WHERE id = $1
+`
+
+func (q *Queries) GetConversationSummary(ctx context.Context, id pgtype.UUID) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getConversationSummary, id)
+	var summary pgtype.Text
+	err := row.Scan(&summary)
+	return summary, err
+}
+
 const listConversations = `-- name: ListConversations :many
-SELECT id, public_key, title, created_at, updated_at, archived_at FROM agent_conversations
+SELECT id, public_key, title, summary, created_at, updated_at, archived_at FROM agent_conversations
 WHERE public_key = $1 AND archived_at IS NULL
 ORDER BY updated_at DESC
 LIMIT $2 OFFSET $3
@@ -114,6 +128,7 @@ func (q *Queries) ListConversations(ctx context.Context, arg *ListConversationsP
 			&i.ID,
 			&i.PublicKey,
 			&i.Title,
+			&i.Summary,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ArchivedAt,
@@ -126,6 +141,25 @@ func (q *Queries) ListConversations(ctx context.Context, arg *ListConversationsP
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateConversationSummary = `-- name: UpdateConversationSummary :execrows
+UPDATE agent_conversations
+SET summary = $1, updated_at = NOW()
+WHERE id = $2
+`
+
+type UpdateConversationSummaryParams struct {
+	Summary pgtype.Text `json:"summary"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateConversationSummary(ctx context.Context, arg *UpdateConversationSummaryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateConversationSummary, arg.Summary, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateConversationTitle = `-- name: UpdateConversationTitle :execrows

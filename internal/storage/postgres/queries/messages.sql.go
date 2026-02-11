@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countMessagesByConversationID = `-- name: CountMessagesByConversationID :one
+SELECT COUNT(*) FROM agent_messages
+WHERE conversation_id = $1
+`
+
+func (q *Queries) CountMessagesByConversationID(ctx context.Context, conversationID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessagesByConversationID, conversationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 
 INSERT INTO agent_messages (conversation_id, role, content, content_type, audio_url, metadata)
@@ -59,6 +71,47 @@ ORDER BY created_at ASC
 
 func (q *Queries) GetMessagesByConversationID(ctx context.Context, conversationID pgtype.UUID) ([]*AgentMessage, error) {
 	rows, err := q.db.Query(ctx, getMessagesByConversationID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*AgentMessage{}
+	for rows.Next() {
+		var i AgentMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.Role,
+			&i.Content,
+			&i.ContentType,
+			&i.AudioUrl,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getRecentMessages = `-- name: GetRecentMessages :many
+SELECT id, conversation_id, role, content, content_type, audio_url, metadata, created_at FROM agent_messages
+WHERE conversation_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type GetRecentMessagesParams struct {
+	ConversationID pgtype.UUID `json:"conversation_id"`
+	Limit          int32       `json:"limit"`
+}
+
+func (q *Queries) GetRecentMessages(ctx context.Context, arg *GetRecentMessagesParams) ([]*AgentMessage, error) {
+	rows, err := q.db.Query(ctx, getRecentMessages, arg.ConversationID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

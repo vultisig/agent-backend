@@ -52,3 +52,29 @@ func (r *MessageRepository) GetByConversationID(ctx context.Context, convID uuid
 	}
 	return messagesFromDB(msgs), nil
 }
+
+// GetRecent returns the most recent messages for a conversation in chronological order.
+func (r *MessageRepository) GetRecent(ctx context.Context, convID uuid.UUID, limit int) ([]types.Message, error) {
+	msgs, err := r.q.GetRecentMessages(ctx, &queries.GetRecentMessagesParams{
+		ConversationID: uuidToPgtype(convID),
+		Limit:          int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get recent messages: %w", err)
+	}
+	result := messagesFromDB(msgs)
+	// Reverse to get chronological order (query returns DESC)
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result, nil
+}
+
+// CountByConversationID returns the total number of messages in a conversation.
+func (r *MessageRepository) CountByConversationID(ctx context.Context, convID uuid.UUID) (int, error) {
+	count, err := r.q.CountMessagesByConversationID(ctx, uuidToPgtype(convID))
+	if err != nil {
+		return 0, fmt.Errorf("count messages: %w", err)
+	}
+	return int(count), nil
+}

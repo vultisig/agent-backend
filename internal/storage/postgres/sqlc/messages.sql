@@ -9,3 +9,13 @@ RETURNING *;
 SELECT * FROM agent_messages
 WHERE conversation_id = $1
 ORDER BY created_at ASC;
+
+-- name: GetRecentMessages :many
+SELECT * FROM agent_messages
+WHERE conversation_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- name: CountMessagesByConversationID :one
+SELECT COUNT(*) FROM agent_messages
+WHERE conversation_id = $1;

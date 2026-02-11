@@ -21,6 +21,7 @@ type Conversation struct {
 	ID         uuid.UUID  `json:"id"`
 	PublicKey  string     `json:"public_key"`
 	Title      *string    `json:"title"`
+	Summary    *string    `json:"summary,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
