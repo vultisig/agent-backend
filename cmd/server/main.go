@@ -73,9 +73,10 @@ func main() {
 	// Initialize repositories
 	convRepo := postgres.NewConversationRepository(db.Pool())
 	msgRepo := postgres.NewMessageRepository(db.Pool())
+	memRepo := postgres.NewMemoryRepository(db.Pool())
 
 	// Initialize agent service
-	agentService := agent.NewAgentService(anthropicClient, msgRepo, convRepo, redisClient, verifierClient, pluginService, logger, cfg.Anthropic.SummaryModel, cfg.Context)
+	agentService := agent.NewAgentService(anthropicClient, msgRepo, convRepo, memRepo, redisClient, verifierClient, pluginService, logger, cfg.Anthropic.SummaryModel, cfg.Context)
 
 	// Initialize API server
 	server := api.NewServer(authService, convRepo, agentService, logger)

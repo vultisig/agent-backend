@@ -26,6 +26,7 @@ type AgentService struct {
 	anthropic        *anthropic.Client
 	msgRepo          *postgres.MessageRepository
 	convRepo         *postgres.ConversationRepository
+	memRepo          *postgres.MemoryRepository
 	redis            *redis.Client
 	verifier         *verifier.Client
 	pluginProvider   PluginSkillsProvider
@@ -48,6 +49,7 @@ func NewAgentService(
 	anthropicClient *anthropic.Client,
 	msgRepo *postgres.MessageRepository,
 	convRepo *postgres.ConversationRepository,
+	memRepo *postgres.MemoryRepository,
 	redisClient *redis.Client,
 	verifierClient *verifier.Client,
 	pluginProvider PluginSkillsProvider,
@@ -59,6 +61,7 @@ func NewAgentService(
 		anthropic:        anthropicClient,
 		msgRepo:          msgRepo,
 		convRepo:         convRepo,
+		memRepo:          memRepo,
 		redis:            redisClient,
 		verifier:         verifierClient,
 		pluginProvider:   pluginProvider,
