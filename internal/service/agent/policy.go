@@ -89,10 +89,20 @@ func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *S
 		addresses = req.Context.Addresses
 	}
 
-	systemPrompt := BuildSystemPromptWithSummary(
-		BuildPolicyBuilderPrompt(suggestion, string(configSchemaJSON), string(examplesJSON), balances, addresses),
-		window.summary,
-	)
+	basePrompt := BuildPolicyBuilderPrompt(suggestion, string(configSchemaJSON), string(examplesJSON), balances, addresses)
+
+	// Inject memory document (read-only) if available
+	if s.memRepo != nil {
+		mem, err := s.memRepo.GetMemory(ctx, req.PublicKey)
+		if err != nil {
+			s.logger.WithError(err).Warn("failed to load memory for policy")
+		}
+		if mem != nil {
+			basePrompt += BuildMemorySection(mem.Content)
+		}
+	}
+
+	systemPrompt := BuildSystemPromptWithSummary(basePrompt, window.summary)
 
 	// 6. Build messages for Anthropic
 	messages := anthropicMessagesFromWindow(window)
