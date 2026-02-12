@@ -7,212 +7,33 @@ package queries
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countCoreMemories = `-- name: CountCoreMemories :one
-SELECT COUNT(*) FROM agent_user_memories
-WHERE public_key = $1 AND memory_type = 'core'
+const getMemory = `-- name: GetMemory :one
+SELECT public_key, content, updated_at FROM agent_user_memories
+WHERE public_key = $1
 `
 
-func (q *Queries) CountCoreMemories(ctx context.Context, publicKey string) (int64, error) {
-	row := q.db.QueryRow(ctx, countCoreMemories, publicKey)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const createMemory = `-- name: CreateMemory :one
-
-INSERT INTO agent_user_memories (public_key, content, category, memory_type)
-VALUES ($1, $2, $3, $4)
-RETURNING id, public_key, content, category, memory_type, created_at, updated_at
-`
-
-type CreateMemoryParams struct {
-	PublicKey  string `json:"public_key"`
-	Content    string `json:"content"`
-	Category   string `json:"category"`
-	MemoryType string `json:"memory_type"`
-}
-
-// User memories table queries
-func (q *Queries) CreateMemory(ctx context.Context, arg *CreateMemoryParams) (*AgentUserMemory, error) {
-	row := q.db.QueryRow(ctx, createMemory,
-		arg.PublicKey,
-		arg.Content,
-		arg.Category,
-		arg.MemoryType,
-	)
+func (q *Queries) GetMemory(ctx context.Context, publicKey string) (*AgentUserMemory, error) {
+	row := q.db.QueryRow(ctx, getMemory, publicKey)
 	var i AgentUserMemory
-	err := row.Scan(
-		&i.ID,
-		&i.PublicKey,
-		&i.Content,
-		&i.Category,
-		&i.MemoryType,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
+	err := row.Scan(&i.PublicKey, &i.Content, &i.UpdatedAt)
 	return &i, err
 }
 
-const deleteMemoryByID = `-- name: DeleteMemoryByID :execrows
-DELETE FROM agent_user_memories
-WHERE id = $1 AND public_key = $2
+const upsertMemory = `-- name: UpsertMemory :exec
+INSERT INTO agent_user_memories (public_key, content, updated_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (public_key) DO UPDATE
+SET content = $2, updated_at = NOW()
 `
 
-type DeleteMemoryByIDParams struct {
-	ID        pgtype.UUID `json:"id"`
-	PublicKey string      `json:"public_key"`
-}
-
-func (q *Queries) DeleteMemoryByID(ctx context.Context, arg *DeleteMemoryByIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteMemoryByID, arg.ID, arg.PublicKey)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const getCoreMemories = `-- name: GetCoreMemories :many
-SELECT id, public_key, content, category, memory_type, created_at, updated_at FROM agent_user_memories
-WHERE public_key = $1 AND memory_type = 'core'
-ORDER BY created_at ASC
-`
-
-func (q *Queries) GetCoreMemories(ctx context.Context, publicKey string) ([]*AgentUserMemory, error) {
-	rows, err := q.db.Query(ctx, getCoreMemories, publicKey)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []*AgentUserMemory{}
-	for rows.Next() {
-		var i AgentUserMemory
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicKey,
-			&i.Content,
-			&i.Category,
-			&i.MemoryType,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, &i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getMemoryByContent = `-- name: GetMemoryByContent :one
-SELECT id, public_key, content, category, memory_type, created_at, updated_at FROM agent_user_memories
-WHERE public_key = $1 AND content = $2
-LIMIT 1
-`
-
-type GetMemoryByContentParams struct {
+type UpsertMemoryParams struct {
 	PublicKey string `json:"public_key"`
 	Content   string `json:"content"`
 }
 
-func (q *Queries) GetMemoryByContent(ctx context.Context, arg *GetMemoryByContentParams) (*AgentUserMemory, error) {
-	row := q.db.QueryRow(ctx, getMemoryByContent, arg.PublicKey, arg.Content)
-	var i AgentUserMemory
-	err := row.Scan(
-		&i.ID,
-		&i.PublicKey,
-		&i.Content,
-		&i.Category,
-		&i.MemoryType,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return &i, err
-}
-
-const searchArchivalMemories = `-- name: SearchArchivalMemories :many
-SELECT id, public_key, content, category, memory_type, created_at, updated_at FROM agent_user_memories
-WHERE public_key = $1 AND memory_type = 'archival' AND content ILIKE '%' || $2 || '%'
-ORDER BY created_at DESC
-LIMIT 10
-`
-
-type SearchArchivalMemoriesParams struct {
-	PublicKey string      `json:"public_key"`
-	Column2   pgtype.Text `json:"column_2"`
-}
-
-func (q *Queries) SearchArchivalMemories(ctx context.Context, arg *SearchArchivalMemoriesParams) ([]*AgentUserMemory, error) {
-	rows, err := q.db.Query(ctx, searchArchivalMemories, arg.PublicKey, arg.Column2)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []*AgentUserMemory{}
-	for rows.Next() {
-		var i AgentUserMemory
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicKey,
-			&i.Content,
-			&i.Category,
-			&i.MemoryType,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, &i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const searchArchivalMemoriesByCategory = `-- name: SearchArchivalMemoriesByCategory :many
-SELECT id, public_key, content, category, memory_type, created_at, updated_at FROM agent_user_memories
-WHERE public_key = $1 AND memory_type = 'archival' AND content ILIKE '%' || $2 || '%' AND category = $3
-ORDER BY created_at DESC
-LIMIT 10
-`
-
-type SearchArchivalMemoriesByCategoryParams struct {
-	PublicKey string      `json:"public_key"`
-	Column2   pgtype.Text `json:"column_2"`
-	Category  string      `json:"category"`
-}
-
-func (q *Queries) SearchArchivalMemoriesByCategory(ctx context.Context, arg *SearchArchivalMemoriesByCategoryParams) ([]*AgentUserMemory, error) {
-	rows, err := q.db.Query(ctx, searchArchivalMemoriesByCategory, arg.PublicKey, arg.Column2, arg.Category)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []*AgentUserMemory{}
-	for rows.Next() {
-		var i AgentUserMemory
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicKey,
-			&i.Content,
-			&i.Category,
-			&i.MemoryType,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, &i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) UpsertMemory(ctx context.Context, arg *UpsertMemoryParams) error {
+	_, err := q.db.Exec(ctx, upsertMemory, arg.PublicKey, arg.Content)
+	return err
 }
