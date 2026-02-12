@@ -75,3 +75,13 @@ type AgentMessage struct {
 	Metadata       []byte             `json:"metadata"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
+
+type AgentUserMemory struct {
+	ID         pgtype.UUID        `json:"id"`
+	PublicKey  string             `json:"public_key"`
+	Content    string             `json:"content"`
+	Category   string             `json:"category"`
+	MemoryType string             `json:"memory_type"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
