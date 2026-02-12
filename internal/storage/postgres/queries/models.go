@@ -77,11 +77,7 @@ type AgentMessage struct {
 }
 
 type AgentUserMemory struct {
-	ID         pgtype.UUID        `json:"id"`
-	PublicKey  string             `json:"public_key"`
-	Content    string             `json:"content"`
-	Category   string             `json:"category"`
-	MemoryType string             `json:"memory_type"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	PublicKey string             `json:"public_key"`
+	Content   string             `json:"content"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

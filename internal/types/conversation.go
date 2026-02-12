@@ -45,3 +45,10 @@ type ConversationWithMessages struct {
 	Conversation
 	Messages []Message `json:"messages"`
 }
+
+// UserMemory represents a user's persistent memory document.
+type UserMemory struct {
+	PublicKey string    `json:"public_key"`
+	Content   string    `json:"content"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

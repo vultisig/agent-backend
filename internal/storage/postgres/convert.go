@@ -129,3 +129,14 @@ func messagesFromDB(ms []*queries.AgentMessage) []types.Message {
 	}
 	return result
 }
+
+func userMemoryFromDB(m *queries.AgentUserMemory) *types.UserMemory {
+	if m == nil {
+		return nil
+	}
+	return &types.UserMemory{
+		PublicKey:  m.PublicKey,
+		Content:   m.Content,
+		UpdatedAt: pgtimestamptzToTime(m.UpdatedAt),
+	}
+}
