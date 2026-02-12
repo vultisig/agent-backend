@@ -276,6 +276,63 @@ Based on the conversation history and the user's selected action, create a confi
 - If frequency was discussed, include it
 - If any required field is unclear, make a reasonable default based on the conversation`
 
+// UpdateMemoryTool is the tool definition for updating the user's memory document.
+var UpdateMemoryTool = anthropic.Tool{
+	Name: "update_memory",
+	Description: "Update your persistent memory about this user. Send the COMPLETE " +
+		"updated memory document (markdown). This replaces the entire document. " +
+		"Only call this when you learn something new worth remembering.",
+	InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"content": map[string]any{
+				"type":        "string",
+				"description": "The full updated memory document in markdown format. Max 4000 characters.",
+			},
+		},
+		"required": []string{"content"},
+	},
+}
+
+// MemoryManagementInstructions is appended to the system prompt for Ability 1 only.
+const MemoryManagementInstructions = `
+
+## Memory Management
+
+You have a persistent memory document about this user that survives across conversations. You can update it anytime using the ` + "`update_memory`" + ` tool.
+
+### When to Update
+- User shares a preference ("I prefer weekly DCA", "I like ETH")
+- User reveals personal info ("My name is Alex")
+- User describes their strategy ("I only DCA into top 10 coins")
+- You learn something that would help in future conversations
+- An action completes (policy created, plugin installed)
+
+### When NOT to Update
+- Trivial greetings or transient chat
+- Information already in your memory document
+- Data available from the app (balances, addresses, prices)
+
+### How to Update
+- Send the COMPLETE updated document — it replaces the entire memory
+- Keep it under 4000 characters
+- Organize naturally using markdown sections
+- Remove outdated information when updating
+- Always include ` + "`respond_to_user`" + ` alongside ` + "`update_memory`" + ``
+
+// BuildMemorySection wraps the user's memory document content for injection into system prompts.
+// Returns empty string if content is empty.
+func BuildMemorySection(content string) string {
+	if content == "" {
+		return ""
+	}
+
+	return "\n\n## Your Memories About This User\n\n" +
+		"This is your persistent memory document about this user. Use it to personalize\n" +
+		"your responses naturally — don't repeat it back unless relevant.\n\n" +
+		content
+}
+
 // BuildPolicyBuilderPrompt constructs the system prompt for Ability 2 (Policy Builder).
 func BuildPolicyBuilderPrompt(suggestion Suggestion, configSchemaJSON string, examplesJSON string, balances []Balance, addresses map[string]string) string {
 	var sb strings.Builder
