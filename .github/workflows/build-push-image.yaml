@@ -3,6 +3,10 @@ name: Build and Push Docker Image
 on:
   workflow_call:
     inputs:
+      service:
+        required: true
+        type: string
+        description: Service name (server)
       registry:
         required: true
         type: string
@@ -20,6 +24,11 @@ on:
         type: string
         description: Additional tag (e.g., latest, dev-latest)
         default: ""
+      platforms:
+        required: false
+        type: string
+        description: Target platforms (e.g., linux/amd64,linux/arm64)
+        default: "linux/amd64"
 
 jobs:
   build-and-push:
@@ -29,6 +38,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -43,9 +55,9 @@ jobs:
       - name: Prepare tags
         id: prep
         run: |
-          TAGS="${{ inputs.registry }}/${{ inputs.image_name }}/server:${{ inputs.tag }}"
+          TAGS="${{ inputs.registry }}/${{ inputs.image_name }}/${{ inputs.service }}:${{ inputs.tag }}"
           if [ -n "${{ inputs.additional_tag }}" ]; then
-            TAGS="${TAGS},${{ inputs.registry }}/${{ inputs.image_name }}/server:${{ inputs.additional_tag }}"
+            TAGS="${TAGS},${{ inputs.registry }}/${{ inputs.image_name }}/${{ inputs.service }}:${{ inputs.additional_tag }}"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
 
@@ -54,7 +66,10 @@ jobs:
         with:
           context: .
           push: true
+          platforms: ${{ inputs.platforms }}
           tags: ${{ steps.prep.outputs.tags }}
+          build-args: |
+            SERVICE=${{ inputs.service }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build and Push Images
 
 on:
   release:
@@ -7,8 +7,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  CLUSTER: plugins-prod-k8s
-  NS: agent
 
 jobs:
   build-server:
@@ -17,6 +15,7 @@ jobs:
       contents: read
       packages: write
     with:
+      service: server
       registry: ghcr.io
       image_name: ${{ github.repository }}
       tag: ${{ github.event.release.tag_name }}
@@ -36,30 +35,28 @@ jobs:
           repo="${{ github.event.repository.name }}"
           gh api -X PATCH "/orgs/${owner}/packages/container/${repo}%2Fserver/visibility" -f visibility=public || true
 
-  deploy:
+  update-manifests:
     needs: [build-server, set-public]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
         with:
-          token: ${{ secrets.DIGITALOCEAN_CI_TOKEN }}
+          ref: main
 
-      - name: Save DigitalOcean kubeconfig
-        run: doctl kubernetes cluster kubeconfig save ${{ env.CLUSTER }}
-
-      - name: Update deployment files
+      - name: Update deployment files with new image tags
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          sed -i "s|image: busybox|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/server:${TAG}|" deploy/01_server.yaml
 
-      - name: Deploy to Kubernetes
+          sed -i "s|image: ghcr.io/${{ env.IMAGE_NAME }}/server:.*|image: ghcr.io/${{ env.IMAGE_NAME }}/server:${TAG}|" deploy/01_server.yaml
+          sed -i "s|image: busybox|image: ghcr.io/${{ env.IMAGE_NAME }}/server:${TAG}|" deploy/01_server.yaml
+
+      - name: Commit and push updated manifests
         run: |
-          kubectl -n ${{ env.NS }} apply -f deploy/prod
-          kubectl -n ${{ env.NS }} apply -f deploy/01_server.yaml
-          kubectl -n ${{ env.NS }} rollout status deployment/server --timeout=300s
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/
+          git commit -m "chore: update image tags to ${{ github.event.release.tag_name }}" || echo "No changes to commit"
+          git push origin main
