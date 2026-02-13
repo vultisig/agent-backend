@@ -27,7 +27,7 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 
 	// 1. Build system prompt for action confirmation
 	basePrompt := BuildConfirmActionPrompt(req.ActionResult)
-	basePrompt += s.loadMemorySection(ctx, req.PublicKey)
+	basePrompt += s.loadMemorySection(ctx, req.PublicKey) + MemoryManagementInstructions
 	systemPrompt := BuildSystemPromptWithSummary(basePrompt, window.summary)
 
 	// 2. Build messages for Anthropic

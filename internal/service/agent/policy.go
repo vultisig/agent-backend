@@ -128,7 +128,7 @@ func (s *AgentService) buildPolicy(ctx context.Context, convID uuid.UUID, req *S
 		return nil, fmt.Errorf("get policy suggest: %w", err)
 	}
 
-	// 11. Build response metadata
+	// 12. Build response metadata
 	metadata := PolicyReadyMetadata{
 		Type:          "policy_ready",
 		Action:        "create_policy",
