@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
 
 	"github.com/vultisig/agent-backend/internal/ai/anthropic"
 	"github.com/vultisig/agent-backend/internal/types"
@@ -28,18 +27,7 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 
 	// 1. Build system prompt for action confirmation
 	basePrompt := BuildConfirmActionPrompt(req.ActionResult)
-
-	// Inject memory document if available
-	if s.memRepo != nil {
-		mem, err := s.memRepo.GetMemory(ctx, req.PublicKey)
-		if err != nil {
-			s.logger.WithError(err).Warn("failed to load memory for confirm")
-		}
-		if mem != nil {
-			basePrompt += BuildMemorySection(mem.Content)
-		}
-	}
-
+	basePrompt += s.loadMemorySection(ctx, req.PublicKey)
 	systemPrompt := BuildSystemPromptWithSummary(basePrompt, window.summary)
 
 	// 2. Build messages for Anthropic
@@ -63,16 +51,18 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		return nil, fmt.Errorf("store user message: %w", err)
 	}
 
-	// 4. Call Anthropic with confirm_action + optional update_memory
+	// 4. Call Anthropic with forced confirm_action + optional update_memory
 	tools := []anthropic.Tool{ConfirmActionTool}
-	if s.memRepo != nil {
-		tools = append(tools, UpdateMemoryTool)
-	}
+	tools = append(tools, s.memoryTools()...)
 
 	anthropicReq := &anthropic.Request{
 		System:   systemPrompt,
 		Messages: messages,
 		Tools:    tools,
+		ToolChoice: &anthropic.ToolChoice{
+			Type: "tool",
+			Name: "confirm_action",
+		},
 	}
 
 	resp, err := s.anthropic.SendMessage(ctx, anthropicReq)
@@ -80,31 +70,14 @@ func (s *AgentService) confirmAction(ctx context.Context, convID uuid.UUID, req 
 		return nil, fmt.Errorf("call anthropic: %w", err)
 	}
 
-	// 5. Parse response: extract confirm_action and optional update_memory
-	confirmResp, memoryUpdate, err := parseConfirmResponseWithMemory(resp)
+	// 5. Parse confirm_action (guaranteed by forced tool choice)
+	confirmResp, err := parseConfirmResponse(resp)
 	if err != nil {
 		return nil, fmt.Errorf("parse confirm response: %w", err)
 	}
 
 	// 6. Fire-and-forget: persist memory update if present
-	if memoryUpdate != nil && s.memRepo != nil {
-		if len(memoryUpdate.Content) <= maxMemoryChars {
-			if err := s.memRepo.UpsertMemory(ctx, req.PublicKey, memoryUpdate.Content); err != nil {
-				s.logger.WithError(err).Error("failed to update memory")
-			} else {
-				s.logger.WithFields(logrus.Fields{
-					"public_key": req.PublicKey,
-					"length":     len(memoryUpdate.Content),
-				}).Debug("memory updated from confirm")
-			}
-		} else {
-			s.logger.WithFields(logrus.Fields{
-				"public_key": req.PublicKey,
-				"length":     len(memoryUpdate.Content),
-				"max":        maxMemoryChars,
-			}).Warn("memory update rejected: too large")
-		}
-	}
+	s.persistMemoryUpdate(ctx, req.PublicKey, s.extractMemoryUpdate(resp))
 
 	// 7. Store assistant message in DB
 	assistantMsg := &types.Message{
@@ -154,33 +127,16 @@ func buildActionResultMessage(result *ActionResult) string {
 	return fmt.Sprintf("[Action failed: %s was not successful]", result.Action)
 }
 
-// parseConfirmResponseWithMemory extracts confirm_action and optional update_memory from Claude's response.
-func parseConfirmResponseWithMemory(resp *anthropic.Response) (*ConfirmResponse, *updateMemoryInput, error) {
-	var confirmResp *ConfirmResponse
-	var memoryUpdate *updateMemoryInput
-
+// parseConfirmResponse extracts the confirm_action tool response from Claude's response.
+func parseConfirmResponse(resp *anthropic.Response) (*ConfirmResponse, error) {
 	for _, block := range resp.Content {
-		if block.Type != "tool_use" {
-			continue
-		}
-		switch block.Name {
-		case "confirm_action":
+		if block.Type == "tool_use" && block.Name == "confirm_action" {
 			var cr ConfirmResponse
 			if err := json.Unmarshal(block.Input, &cr); err != nil {
-				return nil, nil, fmt.Errorf("unmarshal confirm_action: %w", err)
+				return nil, fmt.Errorf("unmarshal confirm_action: %w", err)
 			}
-			confirmResp = &cr
-		case "update_memory":
-			var mu updateMemoryInput
-			if err := json.Unmarshal(block.Input, &mu); err != nil {
-				continue // non-fatal
-			}
-			memoryUpdate = &mu
+			return &cr, nil
 		}
 	}
-
-	if confirmResp == nil {
-		return nil, nil, errors.New("no confirm_action tool response found")
-	}
-	return confirmResp, memoryUpdate, nil
+	return nil, errors.New("no confirm_action tool response found")
 }

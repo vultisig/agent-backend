@@ -14,15 +14,7 @@ import (
 	"github.com/vultisig/agent-backend/internal/types"
 )
 
-const (
-	suggestionTTL  = 1 * time.Hour
-	maxMemoryChars = 4000
-)
-
-// updateMemoryInput is the parsed input for update_memory tool.
-type updateMemoryInput struct {
-	Content string `json:"content"`
-}
+const suggestionTTL = 1 * time.Hour
 
 // detectIntent handles Ability 1: detect user intent and generate response with suggestions.
 func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *SendMessageRequest, window *conversationWindow) (*SendMessageResponse, error) {
@@ -52,19 +44,11 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 
 	basePrompt := BuildFullPrompt(balances, addresses, pluginSkills)
 
-	// 3. Load memory document and inject into system prompt
-	var memoryContent string
-	if s.memRepo != nil {
-		mem, err := s.memRepo.GetMemory(ctx, req.PublicKey)
-		if err != nil {
-			s.logger.WithError(err).Warn("failed to load memory")
-		}
-		if mem != nil {
-			memoryContent = mem.Content
-		}
-	}
-
-	systemPrompt := BuildSystemPromptWithSummary(basePrompt+BuildMemorySection(memoryContent)+MemoryManagementInstructions, window.summary)
+	// 3. Load memory and build system prompt
+	systemPrompt := BuildSystemPromptWithSummary(
+		basePrompt+s.loadMemorySection(ctx, req.PublicKey)+MemoryManagementInstructions,
+		window.summary,
+	)
 
 	// 4. Build messages for Anthropic
 	messages := anthropicMessagesFromWindow(window)
@@ -73,17 +57,19 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 		Content: req.Content,
 	})
 
-	// 5. Build tools list (respond_to_user + update_memory)
+	// 5. Build tools list (respond_to_user + optional update_memory)
 	tools := []anthropic.Tool{RespondToUserTool}
-	if s.memRepo != nil {
-		tools = append(tools, UpdateMemoryTool)
-	}
+	tools = append(tools, s.memoryTools()...)
 
-	// 6. Single Claude call — no agentic loop
+	// 6. Single Claude call — force respond_to_user (update_memory can still be called in parallel)
 	anthropicReq := &anthropic.Request{
 		System:   systemPrompt,
 		Messages: messages,
 		Tools:    tools,
+		ToolChoice: &anthropic.ToolChoice{
+			Type: "tool",
+			Name: "respond_to_user",
+		},
 	}
 
 	resp, err := s.anthropic.SendMessage(ctx, anthropicReq)
@@ -92,53 +78,40 @@ func (s *AgentService) detectIntent(ctx context.Context, convID uuid.UUID, req *
 	}
 
 	// 7. Parse response: extract respond_to_user and optional update_memory
+	s.logger.WithFields(logrus.Fields{
+		"stop_reason":   resp.StopReason,
+		"content_count": len(resp.Content),
+	}).Debug("claude response received")
+	for i, block := range resp.Content {
+		s.logger.WithFields(logrus.Fields{
+			"index":    i,
+			"type":     block.Type,
+			"name":     block.Name,
+			"text_len": len(block.Text),
+		}).Debug("response content block")
+	}
+
 	var toolResp *ToolResponse
 	var textContent string
-	var memoryUpdate *updateMemoryInput
 
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "text":
 			textContent = block.Text
 		case "tool_use":
-			switch block.Name {
-			case "respond_to_user":
+			if block.Name == "respond_to_user" {
 				var tr ToolResponse
 				if err := json.Unmarshal(block.Input, &tr); err != nil {
 					s.logger.WithError(err).Warn("failed to unmarshal respond_to_user")
 					continue
 				}
 				toolResp = &tr
-			case "update_memory":
-				var mu updateMemoryInput
-				if err := json.Unmarshal(block.Input, &mu); err != nil {
-					s.logger.WithError(err).Warn("failed to unmarshal update_memory")
-					continue
-				}
-				memoryUpdate = &mu
 			}
 		}
 	}
 
 	// 8. Fire-and-forget: persist memory update if present
-	if memoryUpdate != nil && s.memRepo != nil {
-		if len(memoryUpdate.Content) <= maxMemoryChars {
-			if err := s.memRepo.UpsertMemory(ctx, req.PublicKey, memoryUpdate.Content); err != nil {
-				s.logger.WithError(err).Error("failed to update memory")
-			} else {
-				s.logger.WithFields(logrus.Fields{
-					"public_key": req.PublicKey,
-					"length":     len(memoryUpdate.Content),
-				}).Debug("memory updated")
-			}
-		} else {
-			s.logger.WithFields(logrus.Fields{
-				"public_key": req.PublicKey,
-				"length":     len(memoryUpdate.Content),
-				"max":        maxMemoryChars,
-			}).Warn("memory update rejected: too large")
-		}
-	}
+	s.persistMemoryUpdate(ctx, req.PublicKey, s.extractMemoryUpdate(resp))
 
 	// 9. Build response
 	if toolResp != nil {
