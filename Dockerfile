@@ -10,7 +10,7 @@ RUN go mod download
 COPY . .
 
 # Build static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/server
 
 # Runtime image
 FROM debian:bookworm-slim
@@ -21,8 +21,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY --from=builder /app/server .
+COPY --from=builder /app/main .
 
 EXPOSE 8080
 
-CMD ["./server"]
+CMD ["./main"]
