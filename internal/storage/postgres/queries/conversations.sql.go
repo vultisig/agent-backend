@@ -94,16 +94,21 @@ func (q *Queries) GetConversationByID(ctx context.Context, arg *GetConversationB
 
 const getConversationSummaryWithCursor = `-- name: GetConversationSummaryWithCursor :one
 SELECT summary, summary_up_to FROM agent_conversations
-WHERE id = $1
+WHERE id = $1 AND public_key = $2
 `
+
+type GetConversationSummaryWithCursorParams struct {
+	ID        pgtype.UUID `json:"id"`
+	PublicKey string      `json:"public_key"`
+}
 
 type GetConversationSummaryWithCursorRow struct {
 	Summary     pgtype.Text        `json:"summary"`
 	SummaryUpTo pgtype.Timestamptz `json:"summary_up_to"`
 }
 
-func (q *Queries) GetConversationSummaryWithCursor(ctx context.Context, id pgtype.UUID) (*GetConversationSummaryWithCursorRow, error) {
-	row := q.db.QueryRow(ctx, getConversationSummaryWithCursor, id)
+func (q *Queries) GetConversationSummaryWithCursor(ctx context.Context, arg *GetConversationSummaryWithCursorParams) (*GetConversationSummaryWithCursorRow, error) {
+	row := q.db.QueryRow(ctx, getConversationSummaryWithCursor, arg.ID, arg.PublicKey)
 	var i GetConversationSummaryWithCursorRow
 	err := row.Scan(&i.Summary, &i.SummaryUpTo)
 	return &i, err
@@ -154,17 +159,23 @@ func (q *Queries) ListConversations(ctx context.Context, arg *ListConversationsP
 const updateConversationSummaryWithCursor = `-- name: UpdateConversationSummaryWithCursor :execrows
 UPDATE agent_conversations
 SET summary = $1, summary_up_to = $2, updated_at = NOW()
-WHERE id = $3
+WHERE id = $3 AND public_key = $4
 `
 
 type UpdateConversationSummaryWithCursorParams struct {
 	Summary     pgtype.Text        `json:"summary"`
 	SummaryUpTo pgtype.Timestamptz `json:"summary_up_to"`
 	ID          pgtype.UUID        `json:"id"`
+	PublicKey   string             `json:"public_key"`
 }
 
 func (q *Queries) UpdateConversationSummaryWithCursor(ctx context.Context, arg *UpdateConversationSummaryWithCursorParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateConversationSummaryWithCursor, arg.Summary, arg.SummaryUpTo, arg.ID)
+	result, err := q.db.Exec(ctx, updateConversationSummaryWithCursor,
+		arg.Summary,
+		arg.SummaryUpTo,
+		arg.ID,
+		arg.PublicKey,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -174,16 +185,17 @@ func (q *Queries) UpdateConversationSummaryWithCursor(ctx context.Context, arg *
 const updateConversationTitle = `-- name: UpdateConversationTitle :execrows
 UPDATE agent_conversations
 SET title = $1, updated_at = NOW()
-WHERE id = $2 AND archived_at IS NULL
+WHERE id = $2 AND public_key = $3 AND archived_at IS NULL
 `
 
 type UpdateConversationTitleParams struct {
-	Title pgtype.Text `json:"title"`
-	ID    pgtype.UUID `json:"id"`
+	Title     pgtype.Text `json:"title"`
+	ID        pgtype.UUID `json:"id"`
+	PublicKey string      `json:"public_key"`
 }
 
 func (q *Queries) UpdateConversationTitle(ctx context.Context, arg *UpdateConversationTitleParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateConversationTitle, arg.Title, arg.ID)
+	result, err := q.db.Exec(ctx, updateConversationTitle, arg.Title, arg.ID, arg.PublicKey)
 	if err != nil {
 		return 0, err
 	}

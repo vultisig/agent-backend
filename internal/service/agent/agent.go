@@ -85,7 +85,7 @@ func (s *AgentService) ProcessMessage(ctx context.Context, convID uuid.UUID, pub
 	}
 
 	// Load conversation window once before routing to abilities
-	window, err := s.getConversationWindow(ctx, convID)
+	window, err := s.getConversationWindow(ctx, convID, publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("get conversation window: %w", err)
 	}
@@ -107,9 +107,9 @@ func (s *AgentService) ProcessMessage(ctx context.Context, convID uuid.UUID, pub
 // getConversationWindow returns a windowed view of the conversation.
 // Uses a summary_up_to cursor to only count/load messages after the last summarization point.
 // This prevents re-summarizing on every request once the trigger threshold is crossed.
-func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UUID) (*conversationWindow, error) {
+func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UUID, publicKey string) (*conversationWindow, error) {
 	// Load summary and cursor together
-	summary, cursor, err := s.convRepo.GetSummaryWithCursor(ctx, convID)
+	summary, cursor, err := s.convRepo.GetSummaryWithCursor(ctx, convID, publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("get summary with cursor: %w", err)
 	}
@@ -145,13 +145,13 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 				return nil, fmt.Errorf("get messages since cursor: %w", err)
 			}
 
-			if err := s.summarizeOldMessages(ctx, convID, allSinceCursor); err != nil {
+			if err := s.summarizeOldMessages(ctx, convID, publicKey, allSinceCursor); err != nil {
 				s.logger.WithError(err).Error("synchronous summarization failed")
 				// Fall back to recent window + existing summary
 			}
 
 			// Reload summary+cursor after summarization (cursor has advanced)
-			summary, cursor, err = s.convRepo.GetSummaryWithCursor(ctx, convID)
+			summary, cursor, err = s.convRepo.GetSummaryWithCursor(ctx, convID, publicKey)
 			if err != nil {
 				return nil, fmt.Errorf("get summary after summarization: %w", err)
 			}
@@ -203,13 +203,13 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 			return nil, fmt.Errorf("get messages: %w", err)
 		}
 
-		if err := s.summarizeOldMessages(ctx, convID, allMsgs); err != nil {
+		if err := s.summarizeOldMessages(ctx, convID, publicKey, allMsgs); err != nil {
 			s.logger.WithError(err).Error("synchronous summarization failed")
 			return &conversationWindow{messages: allMsgs, total: total}, nil
 		}
 
 		// Reload summary+cursor after first summarization
-		summary, cursor, err = s.convRepo.GetSummaryWithCursor(ctx, convID)
+		summary, cursor, err = s.convRepo.GetSummaryWithCursor(ctx, convID, publicKey)
 		if err != nil {
 			return nil, fmt.Errorf("get summary after summarization: %w", err)
 		}
@@ -240,7 +240,7 @@ func (s *AgentService) getConversationWindow(ctx context.Context, convID uuid.UU
 
 // summarizeOldMessages summarizes messages outside the recent window and stores the summary.
 // It runs synchronously and advances the summary_up_to cursor to the last summarized message.
-func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUID, allMsgs []types.Message) error {
+func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUID, publicKey string, allMsgs []types.Message) error {
 	if len(allMsgs) <= s.windowSize {
 		return nil
 	}
@@ -255,7 +255,7 @@ func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUI
 	}
 
 	// Include existing summary for incremental summarization
-	existingSummary, _, _ := s.convRepo.GetSummaryWithCursor(ctx, convID)
+	existingSummary, _, _ := s.convRepo.GetSummaryWithCursor(ctx, convID, publicKey)
 	prompt := SummarizationPrompt
 	if existingSummary != nil {
 		prompt += "\n\n## Previous Summary\n\n" + *existingSummary
@@ -291,7 +291,7 @@ func (s *AgentService) summarizeOldMessages(ctx context.Context, convID uuid.UUI
 
 	// Advance cursor to the last summarized message's timestamp
 	summaryUpTo := oldMsgs[len(oldMsgs)-1].CreatedAt
-	if err := s.convRepo.UpdateSummaryWithCursor(ctx, convID, summaryText, summaryUpTo); err != nil {
+	if err := s.convRepo.UpdateSummaryWithCursor(ctx, convID, publicKey, summaryText, summaryUpTo); err != nil {
 		return fmt.Errorf("store summary with cursor: %w", err)
 	}
 

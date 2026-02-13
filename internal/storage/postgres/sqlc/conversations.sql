@@ -27,13 +27,13 @@ WHERE id = $1 AND public_key = $2 AND archived_at IS NULL;
 -- name: UpdateConversationTitle :execrows
 UPDATE agent_conversations
 SET title = $1, updated_at = NOW()
-WHERE id = $2 AND archived_at IS NULL;
+WHERE id = $2 AND public_key = $3 AND archived_at IS NULL;
 
 -- name: UpdateConversationSummaryWithCursor :execrows
 UPDATE agent_conversations
 SET summary = $1, summary_up_to = $2, updated_at = NOW()
-WHERE id = $3;
+WHERE id = $3 AND public_key = $4;
 
 -- name: GetConversationSummaryWithCursor :one
 SELECT summary, summary_up_to FROM agent_conversations
-WHERE id = $1;
+WHERE id = $1 AND public_key = $2;

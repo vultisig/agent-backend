@@ -175,7 +175,7 @@ func (s *AgentService) buildIntentResponse(ctx context.Context, convID uuid.UUID
 	// Update conversation title if this is the first exchange
 	if window.total <= 2 {
 		title := truncateTitle(req.Content)
-		if err := s.convRepo.UpdateTitle(ctx, convID, title); err != nil {
+		if err := s.convRepo.UpdateTitle(ctx, convID, req.PublicKey, title); err != nil {
 			s.logger.WithError(err).Warn("failed to update conversation title")
 		}
 	}

@@ -106,10 +106,11 @@ func (r *ConversationRepository) Archive(ctx context.Context, id uuid.UUID, publ
 }
 
 // UpdateTitle updates the title of a conversation.
-func (r *ConversationRepository) UpdateTitle(ctx context.Context, id uuid.UUID, title string) error {
+func (r *ConversationRepository) UpdateTitle(ctx context.Context, id uuid.UUID, publicKey string, title string) error {
 	rowsAffected, err := r.q.UpdateConversationTitle(ctx, &queries.UpdateConversationTitleParams{
-		Title: stringPtrToPgtext(&title),
-		ID:    uuidToPgtype(id),
+		Title:     stringPtrToPgtext(&title),
+		ID:        uuidToPgtype(id),
+		PublicKey: publicKey,
 	})
 	if err != nil {
 		return fmt.Errorf("update title: %w", err)
@@ -121,11 +122,12 @@ func (r *ConversationRepository) UpdateTitle(ctx context.Context, id uuid.UUID, 
 }
 
 // UpdateSummaryWithCursor updates the summary and advances the summary_up_to cursor.
-func (r *ConversationRepository) UpdateSummaryWithCursor(ctx context.Context, id uuid.UUID, summary string, summaryUpTo time.Time) error {
+func (r *ConversationRepository) UpdateSummaryWithCursor(ctx context.Context, id uuid.UUID, publicKey string, summary string, summaryUpTo time.Time) error {
 	_, err := r.q.UpdateConversationSummaryWithCursor(ctx, &queries.UpdateConversationSummaryWithCursorParams{
 		Summary:     stringPtrToPgtext(&summary),
 		SummaryUpTo: timeToPgtimestamptz(summaryUpTo),
 		ID:          uuidToPgtype(id),
+		PublicKey:   publicKey,
 	})
 	if err != nil {
 		return fmt.Errorf("update summary with cursor: %w", err)
@@ -134,8 +136,11 @@ func (r *ConversationRepository) UpdateSummaryWithCursor(ctx context.Context, id
 }
 
 // GetSummaryWithCursor returns the summary and summary_up_to cursor of a conversation.
-func (r *ConversationRepository) GetSummaryWithCursor(ctx context.Context, id uuid.UUID) (*string, *time.Time, error) {
-	row, err := r.q.GetConversationSummaryWithCursor(ctx, uuidToPgtype(id))
+func (r *ConversationRepository) GetSummaryWithCursor(ctx context.Context, id uuid.UUID, publicKey string) (*string, *time.Time, error) {
+	row, err := r.q.GetConversationSummaryWithCursor(ctx, &queries.GetConversationSummaryWithCursorParams{
+		ID:        uuidToPgtype(id),
+		PublicKey: publicKey,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, nil
