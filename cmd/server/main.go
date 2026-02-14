@@ -25,6 +25,7 @@ import (
 )
 
 func main() {
+	
 	// Initialize logger
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
