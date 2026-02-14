@@ -1,4 +1,6 @@
-.PHONY: build run test docker-build migrate-up migrate-down lint clean
+.PHONY: build run test docker-build migrate-up migrate-down lint clean deploy-prod deploy-configs deploy-server
+
+NS ?= agent-backend
 
 # Binary name
 BINARY=server
@@ -40,3 +42,12 @@ lint:
 clean:
 	rm -rf bin/
 	rm -f coverage.out coverage.html
+
+deploy-prod: deploy-configs deploy-server
+
+deploy-configs:
+	kubectl -n $(NS) apply -f deploy/prod
+
+deploy-server:
+	kubectl -n $(NS) apply -f deploy/01_server.yaml
+	kubectl -n $(NS) rollout status deployment/server --timeout=300s
