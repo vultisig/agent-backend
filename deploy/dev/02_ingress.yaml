@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: agent
+  name: agent-backend
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     cert-manager.io/cluster-issuer: "letsencrypt"
@@ -9,10 +9,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - agent.dev.plugins.vultisig.com
+        - agent-backend.dev.plugins.vultisig.com
       secretName: agent-tls
   rules:
-    - host: agent.dev.plugins.vultisig.com
+    - host: agent-backend.dev.plugins.vultisig.com
       http:
         paths:
           - path: /
