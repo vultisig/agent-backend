@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: busybox
+          image: ghcr.io/vultisig/agent-backend/server:v1.0.0
           command: ["/app/main"]
           ports:
             - containerPort: 80
